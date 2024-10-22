@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package onode;
+
+message ControlMessage {
+  enum MessageType {
+    REGISTER = 0;
+    REGISTER_RESPONSE = 1;
+    PING = 2;
+    PONG = 3;
+  }
+
+  MessageType type = 1;
+  string node_id = 2;
+  repeated NeighborInfo neighbors = 3;
+}
+
+message NeighborInfo {
+  string node_id = 1;
+  int32 control_port = 2;
+  int32 data_port = 3;
+}
