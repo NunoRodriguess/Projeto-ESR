@@ -1,6 +1,6 @@
 import socket
 import threading
-from overlay_pb2 import ControlMessage, NeighborInfo
+from control_protocol_pb2 import ControlMessage, NeighborInfo
 
 class Bootstrapper:
     def __init__(self, host='localhost', port=5000):

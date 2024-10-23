@@ -5,9 +5,8 @@ import time
 from control_protocol_pb2 import ControlMessage, NeighborInfo
 
 class Node:
-    def __init__(self, node_id, ip_address, control_port=5001, data_port=5002, bootstrapper_host='localhost', bootstrapper_port=5000):
+    def __init__(self, node_id, control_port=5001, data_port=5002, bootstrapper_host='localhost', bootstrapper_port=5000):
         self.node_id = node_id
-        self.ip_address = ip_address
         self.control_port = control_port
         self.data_port = data_port
         self.neighbors = {}  # Dicionário para armazenar vizinhos
@@ -122,11 +121,10 @@ def main():
 
     bootstrapper = sys.argv[1]
     node_id = f"Node-{int(time.time())}"
-    ip_address = "192.168.0.1"  # Substitua pelo IP real do nó
     control_port = 50051
     data_port = 50052
 
-    node = Node(node_id, ip_address, control_port, data_port, bootstrapper)
+    node = Node(node_id, control_port, data_port, bootstrapper)
     node.start()
     
 if __name__ == "__main__":
