@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package onode;
+package node;
 
 message ControlMessage {
   enum MessageType {
