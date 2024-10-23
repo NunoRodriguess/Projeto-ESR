@@ -3,7 +3,7 @@ import threading
 from control_protocol_pb2 import ControlMessage, NeighborInfo
 
 class Bootstrapper:
-    def __init__(self, host='localhost', port=5000):
+    def __init__(self, host='0.0.0.0', port=5000):
         self.host = host
         self.port = port
         self.nodes = {}
