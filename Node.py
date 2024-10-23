@@ -40,7 +40,6 @@ class Node:
                     for n in response_message.neighbors:
                         self.neighbors[n.node_id] = NeighborInfo(
                             node_id=n.node_id,
-                            ip=n.ip,
                             control_port=n.control_port,
                             data_port=n.data_port
                         )
@@ -129,3 +128,4 @@ def main():
     
 if __name__ == "__main__":
     main()
+    
