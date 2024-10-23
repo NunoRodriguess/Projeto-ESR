@@ -24,3 +24,14 @@ message NeighborInfo {
   int32 control_port = 3;
   int32 data_port = 4;
 }
+
+message ContentRequest {
+  string content_id = 1;     
+  string client_id = 2;   
+}
+
+message ContentResponse {
+  string content_id = 1;    
+  string source_ip = 2;     
+  int32 source_port = 3;  
+}
