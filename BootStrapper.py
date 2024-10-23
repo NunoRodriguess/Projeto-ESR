@@ -55,9 +55,35 @@ class Bootstrapper:
 
             # Envia a resposta com a lista de vizinhos
             conn.send(response.SerializeToString())
+            
+            # Atualizar vizinhos de todos os nós
+            self.update_neighbors(node_id)
 
         conn.close()
 
+    def update_neighbors(self, new_node_id):
+        for nid in self.nodes:
+            if nid != new_node_id:
+                # Criar uma mensagem para atualizar vizinhos
+                update_message = ControlMessage()
+                update_message.type = ControlMessage.UPDATE_NEIGHBORS
+                update_message.node_id = new_node_id
+
+                # Adicionar vizinhos do novo nó
+                if new_node_id in self.neighbors_config:
+                    for neighbor_id in self.neighbors_config[new_node_id]:
+                        if neighbor_id in self.nodes:
+                            neighbor_info = NeighborInfo()
+                            neighbor_info.node_id = neighbor_id
+                            neighbor_info.ip, neighbor_info.control_port, neighbor_info.data_port = self.nodes[neighbor_id]
+                            update_message.neighbors.append(neighbor_info)
+
+                # Enviar a atualização para cada nó
+                node_ip, node_control_port, _ = self.nodes[nid]
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.connect((node_ip, node_control_port))
+                    s.send(update_message.SerializeToString())
+                
     def start(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind((self.host, self.port))

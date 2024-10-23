@@ -77,7 +77,19 @@ class Node:
 
                 if control_message.type == ControlMessage.PING:
                     self.handle_ping(control_message, conn)
+                if control_message.type == ControlMessage.UPDATE_NEIGHBORS:
+                    self.handle_update_neighbors(control_message)
                     
+    def handle_update_neighbors(self, control_message):
+        print(f"Updating neighbors with {control_message.node_id}")
+        for neighbor in control_message.neighbors:
+            self.neighbors[neighbor.node_id] = NeighborInfo(
+                node_id=neighbor.node_id,
+                control_port=neighbor.control_port,
+                data_port=neighbor.data_port
+            )
+        print(f"Updated neighbors: {self.neighbors}")
+        
     def data_server(self):
         # Implementar lógica do servidor de dados
         pass
@@ -114,12 +126,12 @@ class Node:
                     print(f"Failed to send ping: {e}")
 
 def main():
-    if len(sys.argv) != 2:
-        print("Usage: python Node.py <bootstrapper_ip>")
+    if len(sys.argv) != 3:
+        print("Usage: python Node.py <bootstrapper_ip> <node_id>")
         sys.exit(1)
 
     bootstrapper = sys.argv[1]
-    node_id = f"Node-{int(time.time())}"
+    node_id = sys.argv[2]
     control_port = 50051
     data_port = 50052
 
