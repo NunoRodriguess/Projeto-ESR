@@ -12,15 +12,16 @@ message ControlMessage {
   }
 
   MessageType type = 1;
-  string node_id = 2;
-  repeated NeighborInfo neighbors = 3;
-  int32 control_port = 4;
-  int32 data_port = 5;
+  string node_ip = 2;
+  string node_id = 3;
+  repeated NeighborInfo neighbors = 4;
+  int32 control_port = 5;
+  int32 data_port = 6;
 }
 
 message NeighborInfo {
   string node_id = 1;
-  string ip = 2;
+  string node_ip = 2;
   int32 control_port = 3;
   int32 data_port = 4;
 }

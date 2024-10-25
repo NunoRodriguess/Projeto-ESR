@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x16\x63ontrol_protocol.proto\x12\x04node\"\xff\x01\n\x0e\x43ontrolMessage\x12.\n\x04type\x18\x01 \x01(\x0e\x32 .node.ControlMessage.MessageType\x12\x0f\n\x07node_id\x18\x02 \x01(\t\x12%\n\tneighbors\x18\x03 \x03(\x0b\x32\x12.node.NeighborInfo\x12\x14\n\x0c\x63ontrol_port\x18\x04 \x01(\x05\x12\x11\n\tdata_port\x18\x05 \x01(\x05\"\\\n\x0bMessageType\x12\x0c\n\x08REGISTER\x10\x00\x12\x15\n\x11REGISTER_RESPONSE\x10\x01\x12\x08\n\x04PING\x10\x02\x12\x08\n\x04PONG\x10\x03\x12\x14\n\x10UPDATE_NEIGHBORS\x10\x04\"T\n\x0cNeighborInfo\x12\x0f\n\x07node_id\x18\x01 \x01(\t\x12\n\n\x02ip\x18\x02 \x01(\t\x12\x14\n\x0c\x63ontrol_port\x18\x03 \x01(\x05\x12\x11\n\tdata_port\x18\x04 \x01(\x05\"7\n\x0e\x43ontentRequest\x12\x12\n\ncontent_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\"M\n\x0f\x43ontentResponse\x12\x12\n\ncontent_id\x18\x01 \x01(\t\x12\x11\n\tsource_ip\x18\x02 \x01(\t\x12\x13\n\x0bsource_port\x18\x03 \x01(\x05\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x16\x63ontrol_protocol.proto\x12\x04node\"\x90\x02\n\x0e\x43ontrolMessage\x12.\n\x04type\x18\x01 \x01(\x0e\x32 .node.ControlMessage.MessageType\x12\x0f\n\x07node_ip\x18\x02 \x01(\t\x12\x0f\n\x07node_id\x18\x03 \x01(\t\x12%\n\tneighbors\x18\x04 \x03(\x0b\x32\x12.node.NeighborInfo\x12\x14\n\x0c\x63ontrol_port\x18\x05 \x01(\x05\x12\x11\n\tdata_port\x18\x06 \x01(\x05\"\\\n\x0bMessageType\x12\x0c\n\x08REGISTER\x10\x00\x12\x15\n\x11REGISTER_RESPONSE\x10\x01\x12\x08\n\x04PING\x10\x02\x12\x08\n\x04PONG\x10\x03\x12\x14\n\x10UPDATE_NEIGHBORS\x10\x04\"Y\n\x0cNeighborInfo\x12\x0f\n\x07node_id\x18\x01 \x01(\t\x12\x0f\n\x07node_ip\x18\x02 \x01(\t\x12\x14\n\x0c\x63ontrol_port\x18\x03 \x01(\x05\x12\x11\n\tdata_port\x18\x04 \x01(\x05\"7\n\x0e\x43ontentRequest\x12\x12\n\ncontent_id\x18\x01 \x01(\t\x12\x11\n\tclient_id\x18\x02 \x01(\t\"M\n\x0f\x43ontentResponse\x12\x12\n\ncontent_id\x18\x01 \x01(\t\x12\x11\n\tsource_ip\x18\x02 \x01(\t\x12\x13\n\x0bsource_port\x18\x03 \x01(\x05\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,13 +32,13 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'control_protocol_pb2', _glo
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_CONTROLMESSAGE']._serialized_start=33
-  _globals['_CONTROLMESSAGE']._serialized_end=288
-  _globals['_CONTROLMESSAGE_MESSAGETYPE']._serialized_start=196
-  _globals['_CONTROLMESSAGE_MESSAGETYPE']._serialized_end=288
-  _globals['_NEIGHBORINFO']._serialized_start=290
-  _globals['_NEIGHBORINFO']._serialized_end=374
-  _globals['_CONTENTREQUEST']._serialized_start=376
-  _globals['_CONTENTREQUEST']._serialized_end=431
-  _globals['_CONTENTRESPONSE']._serialized_start=433
-  _globals['_CONTENTRESPONSE']._serialized_end=510
+  _globals['_CONTROLMESSAGE']._serialized_end=305
+  _globals['_CONTROLMESSAGE_MESSAGETYPE']._serialized_start=213
+  _globals['_CONTROLMESSAGE_MESSAGETYPE']._serialized_end=305
+  _globals['_NEIGHBORINFO']._serialized_start=307
+  _globals['_NEIGHBORINFO']._serialized_end=396
+  _globals['_CONTENTREQUEST']._serialized_start=398
+  _globals['_CONTENTREQUEST']._serialized_end=453
+  _globals['_CONTENTRESPONSE']._serialized_start=455
+  _globals['_CONTENTRESPONSE']._serialized_end=532
 # @@protoc_insertion_point(module_scope)
