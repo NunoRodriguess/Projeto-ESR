@@ -78,6 +78,8 @@ class Node:
         self.register_with_bootstrapper()
         threading.Thread(target=self.control_server).start()  # Inicia o servidor de controle em uma thread separada
         threading.Thread(target=self.data_server).start()     # Inicia o servidor de dados em uma thread separada
+        threading.Thread(target=self.send_ping_to_neighbors).start()  # Atualizado para enviar PING aos vizinhos
+
 
     ### Funcionalidades de comunicação de controle
 
@@ -117,6 +119,10 @@ class Node:
                     # Atualizar vizinhos
                     if control_message.type == ControlMessage.UPDATE_NEIGHBORS:
                         self.handle_update_neighbors(control_message)
+                    
+                    # Enviar ping aos vizinhos
+                    if control_message.type == ControlMessage.PING:
+                        self.handle_ping(control_message, conn)
 
     def handle_update_neighbors(self, control_message):
         print(f"Updating neighbors with {control_message.node_id}")
@@ -132,6 +138,40 @@ class Node:
                 "data_port": data_port
             }
         print(f"Updated neighbors: {self.neighbors}")
+        
+    # Enviar mensagens de ping a todos os vizinhos
+    def send_ping_to_neighbors(self):
+        while True:
+            time.sleep(10) 
+            for neighbor_ip, neighbor_info in self.neighbors.items():
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        s.connect((neighbor_ip, neighbor_info['control_port']))
+                        ping_message = ControlMessage()
+                        ping_message.type = ControlMessage.PING
+                        ping_message.node_ip = self.node_ip
+                        ping_message.node_id = self.node_id
+                        s.send(ping_message.SerializeToString())
+                        print(f"Sent PING to neighbor {neighbor_info['node_id']}")
+  
+                        # Espera pela resposta PONG
+                        data = s.recv(1024)
+                        if data:
+                            response_message = ControlMessage()
+                            response_message.ParseFromString(data)
+                            if response_message.type == ControlMessage.PONG:
+                                print(f"Received PONG from neighbor {response_message.node_id}")
+                except Exception as e:
+                    print(f"Failed to send ping to neighbor {neighbor_info['node_id']}: {e}")
+                    
+    # Responder a uma mensagem de ping
+    def handle_ping(self, control_message, conn):
+        print(f"Received PING from neighbor {control_message.node_id}")
+        pong_message = ControlMessage()
+        pong_message.type = ControlMessage.PONG
+        pong_message.node_id = self.node_id
+        conn.send(pong_message.SerializeToString())
+        print(f"Sent PONG to neighbor{control_message.node_id}")
     
     ### Funcionalidades de comunicação de dados
 
@@ -148,19 +188,6 @@ class Node:
         #         print(f"Data connection from {addr} established.")
         #         conn.close()
         pass
-
-    ### Funcionalidade auxiliar
-
-    def create_pong_message(self):
-        """
-        Cria uma mensagem PONG em resposta a uma mensagem PING recebida.
-
-        :return: Mensagem de controle PONG.
-        """
-        pong_message = ControlMessage()
-        pong_message.type = ControlMessage.PONG
-        pong_message.node_id = self.node_id
-        return pong_message
 
 ### Função principal para iniciar o nó
 
