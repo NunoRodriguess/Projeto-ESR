@@ -57,6 +57,7 @@ class Node:
                 
                 if response_message.type == ControlMessage.REGISTER_RESPONSE:
                     print(f"Node {self.node_id} registered")
+                    self.neighbors.clear()  # Limpa vizinhos antigos para o caso de ser uma reativação
                     for neighbor in response_message.neighbors:
                         self.neighbors[neighbor.node_ip] = {
                             "node_id": neighbor.node_id,
@@ -64,7 +65,6 @@ class Node:
                             "data_port": neighbor.data_port
                         }
                     print(f"Node {self.node_id} neighbors: {self.neighbors}")
-                    
                 else:
                     print(f"Unexpected response type: {response_message.type}")
 
@@ -135,15 +135,27 @@ class Node:
             self.neighbors[neighbor_ip] = {
                 "node_id": neighbor_id,
                 "control_port": control_port,
-                "data_port": data_port
+                "data_port": data_port,
+                "tentativas": 0
             }
         print(f"Updated neighbors: {self.neighbors}")
         
-    # Enviar mensagens de ping a todos os vizinhos
     def send_ping_to_neighbors(self):
         while True:
-            time.sleep(10) 
-            for neighbor_ip, neighbor_info in self.neighbors.items():
+            time.sleep(10)
+            
+            for neighbor_ip, neighbor_info in list(self.neighbors.items()):
+                # Verificar se o vizinho já está marcado como inativo
+                if neighbor_info.get("status") == "inactive":
+                    continue  # Ignora o envio de PING para vizinhos já considerados inativos
+
+                # Verifica o número de tentativas
+                if neighbor_info.get("tentativas", 0) >= 2:
+                    print(f"Neighbor {neighbor_info['node_id']} considered inactive due to lack of PONG response.")
+                    neighbor_info["status"] = "inactive"
+                    self.notify_bootstrapper_inactive(neighbor_ip)  # Notifica o Bootstrapper
+                    continue  # Ignora o envio de PING para vizinhos já considerados inativos
+
                 try:
                     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                         s.connect((neighbor_ip, neighbor_info['control_port']))
@@ -153,7 +165,7 @@ class Node:
                         ping_message.node_id = self.node_id
                         s.send(ping_message.SerializeToString())
                         print(f"Sent PING to neighbor {neighbor_info['node_id']}")
-  
+
                         # Espera pela resposta PONG
                         data = s.recv(1024)
                         if data:
@@ -161,8 +173,26 @@ class Node:
                             response_message.ParseFromString(data)
                             if response_message.type == ControlMessage.PONG:
                                 print(f"Received PONG from neighbor {response_message.node_id}")
+                                # Resetamos as tentativas falhas em caso de resposta
+                                neighbor_info["tentativas"] = 0
+                                neighbor_info["status"] = "active"
+
                 except Exception as e:
-                    print(f"Failed to send ping to neighbor {neighbor_info['node_id']}: {e}")
+                    # Incrementa o contador de tentativas falhas
+                    print(f"Failed to send PING to neighbor {neighbor_info['node_id']}: {e}")
+                    neighbor_info["tentativas"] = neighbor_info.get("tentativas", 0) + 1
+
+
+    # Notifica o Bootstrapper que o nó está inativo
+    def notify_bootstrapper_inactive(self, neighbor_ip):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect(self.bootstrapper)  # Conecta ao Bootstrapper
+            inactive_message = ControlMessage()
+            inactive_message.type = ControlMessage.INACTIVE_NODE
+            inactive_message.node_ip = neighbor_ip 
+            s.send(inactive_message.SerializeToString())
+            print(f"Notified bootstrapper about inactive neighbor {neighbor_ip}")
+
                     
     # Responder a uma mensagem de ping
     def handle_ping(self, control_message, conn):
@@ -171,7 +201,13 @@ class Node:
         pong_message.type = ControlMessage.PONG
         pong_message.node_id = self.node_id
         conn.send(pong_message.SerializeToString())
-        print(f"Sent PONG to neighbor{control_message.node_id}")
+        print(f"Sent PONG to neighbor {control_message.node_id}")
+        
+        # Reinicia as tentativas falhas do nó que enviou o PING
+        with self.lock:
+            if control_message.node_ip in self.neighbors:
+                self.neighbors[control_message.node_ip]["tentativas"] = 0
+                self.neighbors[control_message.node_ip]["status"] = "active"
     
     ### Funcionalidades de comunicação de dados
 
