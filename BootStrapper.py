@@ -1,50 +1,3 @@
-  # def ping_nodes(self, node_id, control_port, ip_address):
-    #     """
-    #     Função para enviar mensagens de PING para a porta de controle de um nó e receber o PONG.
-    #     """
-    #     while True:
-    #         time.sleep(self.ping_interval)
-    #         try:
-    #             # Conectar à porta de controle do nó para enviar o PING
-    #             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-    #                 s.connect((ip_address, control_port))  # Usar o IP e a porta de controle do nó
-
-    #                 # Enviar o PING
-    #                 ping_message = ControlMessage()
-    #                 ping_message.type = ControlMessage.PING
-    #                 ping_message.node_id = "Bootstrapper"
-    #                 s.send(ping_message.SerializeToString())
-    #                 print(f"Sent PING to {node_id} on control port {control_port}")
-
-    #                 # Receber o PONG
-    #                 s.settimeout(self.timeout)
-    #                 data = s.recv(1024)
-    #                 if data:
-    #                     pong_message = ControlMessage()
-    #                     pong_message.ParseFromString(data)
-    #                     if pong_message.type == ControlMessage.PONG:
-    #                         print(f"Received PONG from {node_id}")
-
-    #                         # Atualizar o tempo do último PONG recebido
-    #                         with self.lock:
-    #                             if node_id in self.nodes:
-    #                                 self.nodes[node_id] = (self.nodes[node_id][0], self.nodes[node_id][1],
-    #                                                     self.nodes[node_id][2], time.time())
-
-    #         except socket.timeout:
-    #             print(f"Node {node_id} did not respond in time. Removing node.")
-    #             with self.lock:
-    #                 if node_id in self.nodes:
-    #                     del self.nodes[node_id]
-    #             break
-
-    #         except Exception as e:
-    #             print(f"Error sending PING to node {node_id}: {e}")
-    #             with self.lock:
-    #                 if node_id in self.nodes:
-    #                     del self.nodes[node_id]
-    #             break
-
 import socket
 import threading
 import time
@@ -88,7 +41,7 @@ class Bootstrapper:
             new_node = self.nodes[new_node_ip]
 
             for neighbor_id, neighbor_ip in self.neighbors_config[new_node_ip]["neighbors"]:
-                if neighbor_ip in self.nodes:  # Verifica se o vizinho está registrado
+                if neighbor_ip in self.nodes and self.nodes[neighbor_ip]['status'] == 'active':  # Apenas envia vizinhos registados ativos
                     neighbor_node = self.nodes[neighbor_ip]
                     
                     try:
@@ -113,6 +66,20 @@ class Bootstrapper:
 
                     except Exception as e:
                         print(f"Failed to update neighbor {neighbor_ip} with new node {new_node_ip}: {e}")
+                        
+    def notify_neighbor_inactive(self, neighbor_ip):
+        """
+        Atualiza o status do vizinho como inativo.
+
+        :param node_ip: O IP do nó que está informando a inatividade.
+        :param inactive_neighbor_ip: O IP do vizinho considerado inativo.
+        """
+        with self.lock:
+            # Atualiza o status do vizinho como inativo
+            if neighbor_ip in self.nodes:
+                self.nodes[neighbor_ip]['status'] = "inactive"
+                print(f"Node {self.nodes[neighbor_ip]['node_id']} is inactive.")
+
 
     def handle_client(self, conn):
         try:
@@ -130,12 +97,17 @@ class Bootstrapper:
                     data_port = control_message.data_port
 
                     with self.lock:
-                        self.nodes[node_ip] = {
-                            "node_id": node_id,
-                            "control_port": control_port,
-                            "data_port": data_port
-                        }
-                    print(f"Registered node {node_id} at {node_ip}:{control_port}")
+                        if node_ip in self.nodes:
+                            self.nodes[node_ip]['status'] = "active"
+                            print(f"Node {node_id} reactivated.")
+                        else:
+                            self.nodes[node_ip] = {
+                                "node_id": node_id,
+                                "control_port": control_port,
+                                "data_port": data_port,
+                                "status": "active" 
+                            }
+                        print(f"Registered node {node_id} at {node_ip}:{control_port}")
                     
                     response = ControlMessage()
                     response.type = ControlMessage.REGISTER_RESPONSE
@@ -144,7 +116,7 @@ class Bootstrapper:
                     # Adiciona os vizinhos à resposta se houver
                     if node_ip in self.neighbors_config:
                         for neighbor_id, neighbor_ip in self.neighbors_config[node_ip]["neighbors"]:
-                            if neighbor_ip in self.nodes:  # Apenas envia vizinhos registrados
+                            if neighbor_ip in self.nodes and self.nodes[neighbor_ip]['status'] == 'active':  # Apenas envia vizinhos registados ativos
                                 neighbor_info = NeighborInfo()
                                 neighbor_info.node_id = neighbor_id
                                 neighbor_info.node_ip = neighbor_ip
@@ -160,6 +132,11 @@ class Bootstrapper:
 
                     # Reestabelece a conexão para atualização de vizinhos
                     self.update_neighbors(node_ip)
+                
+                elif control_message.type == ControlMessage.INACTIVE_NODE:
+                    # Lida com a notificação de nó inativo
+                    inactive_neighbor_ip = control_message.node_ip  # IP do vizinho inativo
+                    self.notify_neighbor_inactive(inactive_neighbor_ip)
 
         except Exception as e:
             print(f"Error handling connection from {node_ip}: {e}")

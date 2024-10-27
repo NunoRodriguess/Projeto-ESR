@@ -9,6 +9,7 @@ message ControlMessage {
     PING = 2;
     PONG = 3;
     UPDATE_NEIGHBORS = 4;
+    INACTIVE_NODE = 5;  // Novo tipo de mensagem
   }
 
   MessageType type = 1;
