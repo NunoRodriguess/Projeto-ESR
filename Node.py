@@ -10,7 +10,7 @@ class Node:
     O nó registra-se em um Bootstrapper e mantém conexões com seus vizinhos.
     """
     
-    def __init__(self, node_id, node_ip, control_port=5001, data_port=5002, bootstrapper_host='localhost', bootstrapper_port=5000):
+    def __init__(self, node_id, node_ip, type , control_port=5001, data_port=5002, bootstrapper_host='localhost', bootstrapper_port=5000):
         """
         Inicializa um nó com identificador e portas específicas.
 
@@ -27,6 +27,7 @@ class Node:
         self.neighbors = {}  # Dicionário para armazenar informações dos vizinhos
         self.bootstrapper = (bootstrapper_host, bootstrapper_port)
         self.lock = threading.Lock()  # Lock para sincronizar o acesso aos vizinhos
+        self.type = type
 
     ### Funcionalidades de registro com o Bootstrapper
 
@@ -45,6 +46,7 @@ class Node:
             control_message.node_ip = self.node_ip
             control_message.control_port = self.control_port
             control_message.data_port = self.data_port
+            control_message.node_type = self.type
             
             # Envia a mensagem de registro
             s.send(control_message.SerializeToString())
@@ -62,7 +64,9 @@ class Node:
                         self.neighbors[neighbor.node_ip] = {
                             "node_id": neighbor.node_id,
                             "control_port": neighbor.control_port,
-                            "data_port": neighbor.data_port
+                            "data_port": neighbor.data_port,
+                            "node_type": neighbor.node_type,
+                            "tentativas": 0
                         }
                     print(f"Node {self.node_id} neighbors: {self.neighbors}")
                 else:
@@ -78,7 +82,8 @@ class Node:
         self.register_with_bootstrapper()
         threading.Thread(target=self.control_server).start()  # Inicia o servidor de controle em uma thread separada
         threading.Thread(target=self.data_server).start()     # Inicia o servidor de dados em uma thread separada
-        threading.Thread(target=self.send_ping_to_neighbors).start()  # Atualizado para enviar PING aos vizinhos
+        if self.type == "node":
+            threading.Thread(target=self.send_ping_to_neighbors).start()  # Enviar PING aos vizinhos
 
 
     ### Funcionalidades de comunicação de controle
@@ -120,7 +125,7 @@ class Node:
                     if control_message.type == ControlMessage.UPDATE_NEIGHBORS:
                         self.handle_update_neighbors(control_message)
                     
-                    # Enviar ping aos vizinhos
+                    # Enviar ping aos vizinhos (só para os nodes)
                     if control_message.type == ControlMessage.PING:
                         self.handle_ping(control_message, conn)
 
@@ -131,11 +136,13 @@ class Node:
             neighbor_ip = neighbor.node_ip
             control_port = neighbor.control_port
             data_port = neighbor.data_port
+            node_type = neighbor.node_type
             # Armazena as informações do vizinho na estrutura do nó
             self.neighbors[neighbor_ip] = {
                 "node_id": neighbor_id,
                 "control_port": control_port,
                 "data_port": data_port,
+                "node_type": node_type,
                 "tentativas": 0
             }
         print(f"Updated neighbors: {self.neighbors}")
@@ -146,8 +153,8 @@ class Node:
             
             for neighbor_ip, neighbor_info in list(self.neighbors.items()):
                 # Verificar se o vizinho já está marcado como inativo
-                if neighbor_info.get("status") == "inactive":
-                    continue  # Ignora o envio de PING para vizinhos já considerados inativos
+                if neighbor_info.get("status") == "inactive" or neighbor_info.get("node_type") == "pop":
+                    continue  # Ignora o envio de PING para vizinhos já considerados inativos ou para pop's
 
                 # Verifica o número de tentativas
                 if neighbor_info.get("tentativas", 0) >= 2:
@@ -232,17 +239,18 @@ def main():
     Função principal para executar o nó.
     Recebe o endereço do Bootstrapper e o ID do nó como parâmetros de linha de comando.
     """
-    if len(sys.argv) != 4:
-        print("Usage: python Node.py <bootstrapper_ip> <node_id> <node_ip>")
+    if len(sys.argv) != 5:
+        print("Usage: python Node.py <bootstrapper_ip> <node_id> <node_ip> <type(node/pop)>")
         sys.exit(1)
 
     bootstrapper = sys.argv[1]
     node_id = sys.argv[2]
     node_ip = sys.argv[3]
+    type = sys.argv[4]
     control_port = 50051  # Porta de controle padrão
     data_port = 50052     # Porta de dados padrão
 
-    node = Node(node_id, node_ip, control_port, data_port, bootstrapper)
+    node = Node(node_id, node_ip, type, control_port, data_port, bootstrapper)
     node.start()
 
 if __name__ == "__main__":

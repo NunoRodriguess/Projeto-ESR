@@ -7,7 +7,7 @@ class Bootstrapper:
     def __init__(self, host='0.0.0.0', port=5000, config_file='config.txt', ping_interval=10, timeout=20):
         self.host = host
         self.port = port
-        self.nodes = {}  # Dicionário para armazenar informações dos nós registrados
+        self.nodes = {}  # Dicionário para armazenar informações dos nodes/clientes registrados
         self.neighbors_config = self.load_neighbors(config_file)
         self.ping_interval = ping_interval
         self.timeout = timeout
@@ -59,6 +59,7 @@ class Bootstrapper:
                             new_neighbor_info.node_ip = new_node_ip
                             new_neighbor_info.control_port = new_node["control_port"]
                             new_neighbor_info.data_port = new_node["data_port"]
+                            new_neighbor_info.node_type = new_node["node_type"]
                             neighbor_update_message.neighbors.append(new_neighbor_info)
 
                             s.send(neighbor_update_message.SerializeToString())
@@ -95,23 +96,30 @@ class Bootstrapper:
                     node_ip = control_message.node_ip
                     control_port = control_message.control_port
                     data_port = control_message.data_port
+                    node_type = control_message.node_type
 
                     with self.lock:
                         if node_ip in self.nodes:
                             self.nodes[node_ip]['status'] = "active"
-                            print(f"Node {node_id} reactivated.")
-                        else:
+                            if node_type == "node":
+                                print(f"Node {node_id} reactivated.")
+                            else:
+                                print(f"Client {node_id} reactivated.")
+                        else:           
                             self.nodes[node_ip] = {
                                 "node_id": node_id,
                                 "control_port": control_port,
                                 "data_port": data_port,
+                                "node_type": node_type,
                                 "status": "active" 
                             }
-                        print(f"Registered node {node_id} at {node_ip}:{control_port}")
-                    
+                            if node_type == "node":
+                                print(f"Registered node {node_id} at {node_ip}:{control_port}")
+                            else:
+                                print(f"Registered client {node_id} at {node_ip}:{control_port}")
+
                     response = ControlMessage()
                     response.type = ControlMessage.REGISTER_RESPONSE
-                    response.node_ip = node_ip
                     
                     # Adiciona os vizinhos à resposta se houver
                     if node_ip in self.neighbors_config:
