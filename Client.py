@@ -52,6 +52,7 @@ class Client:
                                 "control_port": neighbor.control_port,
                                 "data_port": neighbor.data_port,
                                 "node_type": neighbor.node_type,
+                                "status": "active",
                                 "tentativas": 0
                             }
                     print(f"Client {self.client_id} Pop's: {self.neighbors}")
