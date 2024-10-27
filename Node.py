@@ -10,7 +10,7 @@ class Node:
     O nó registra-se em um Bootstrapper e mantém conexões com seus vizinhos.
     """
     
-    def __init__(self, node_id, node_ip, type , control_port=5001, data_port=5002, bootstrapper_host='localhost', bootstrapper_port=5000):
+    def __init__(self, node_id, node_ip, node_type, control_port=5001, data_port=5002, bootstrapper_host='localhost', bootstrapper_port=5000):
         """
         Inicializa um nó com identificador e portas específicas.
 
@@ -27,7 +27,7 @@ class Node:
         self.neighbors = {}  # Dicionário para armazenar informações dos vizinhos
         self.bootstrapper = (bootstrapper_host, bootstrapper_port)
         self.lock = threading.Lock()  # Lock para sincronizar o acesso aos vizinhos
-        self.type = type
+        self.node_type = node_type
 
     ### Funcionalidades de registro com o Bootstrapper
 
@@ -46,7 +46,7 @@ class Node:
             control_message.node_ip = self.node_ip
             control_message.control_port = self.control_port
             control_message.data_port = self.data_port
-            control_message.node_type = self.type
+            control_message.node_type = self.node_type
             
             # Envia a mensagem de registro
             s.send(control_message.SerializeToString())
@@ -69,8 +69,31 @@ class Node:
                             "tentativas": 0
                         }
                     print(f"Node {self.node_id} neighbors: {self.neighbors}")
+                    # Após o registro, notifica os vizinhos sobre o registro
+                    self.notify_neighbors_registration()
                 else:
                     print(f"Unexpected response type: {response_message.type}")
+
+    def notify_neighbors_registration(self):
+        """
+        Notifica os vizinhos que o nó está registrado e que pode haver atualizações.
+        """
+        for neighbor_ip, neighbor_info in self.neighbors.items():
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.connect((neighbor_ip, neighbor_info['control_port']))
+                    notify_message = ControlMessage()
+                    notify_message.type = ControlMessage.UPDATE_NEIGHBORS
+                    notify_message.node_id = self.node_id
+                    notify_message.node_ip = self.node_ip
+                    notify_message.control_port = self.control_port
+                    notify_message.data_port = self.data_port
+                    notify_message.node_type = self.node_type
+                    s.send(notify_message.SerializeToString())
+                    print(f"Notified neighbor {neighbor_info['node_id']} of registration.")
+
+            except Exception as e:
+                print(f"Failed to notify neighbor {neighbor_info['node_id']}: {e}")
 
     ### Funcionalidades de inicialização do nó
 
@@ -83,7 +106,6 @@ class Node:
         threading.Thread(target=self.control_server).start()  # Inicia o servidor de controle em uma thread separada
         threading.Thread(target=self.data_server).start()     # Inicia o servidor de dados em uma thread separada
         threading.Thread(target=self.send_ping_to_neighbors).start()  # Enviar PING aos vizinhos
-
 
     ### Funcionalidades de comunicação de controle
 
@@ -130,20 +152,19 @@ class Node:
 
     def handle_update_neighbors(self, control_message):
         print(f"Updating neighbors with {control_message.node_id}")
-        for neighbor in control_message.neighbors:
-            neighbor_id = neighbor.node_id
-            neighbor_ip = neighbor.node_ip
-            control_port = neighbor.control_port
-            data_port = neighbor.data_port
-            node_type = neighbor.node_type
-            # Armazena as informações do vizinho na estrutura do nó
-            self.neighbors[neighbor_ip] = {
-                "node_id": neighbor_id,
-                "control_port": control_port,
-                "data_port": data_port,
-                "node_type": node_type,
-                "tentativas": 0
-            }
+        neighbor_id = control_message.node_id
+        neighbor_ip = control_message.node_ip
+        control_port = control_message.control_port
+        data_port = control_message.data_port
+        node_type = control_message.node_type
+        # Armazena as informações do vizinho na estrutura do nó
+        self.neighbors[neighbor_ip] = {
+            "node_id": neighbor_id,
+            "control_port": control_port,
+            "data_port": data_port,
+            "node_type": node_type,
+            "tentativas": 0
+        }
         print(f"Updated neighbors: {self.neighbors}")
         
     def send_ping_to_neighbors(self):
@@ -153,7 +174,7 @@ class Node:
             for neighbor_ip, neighbor_info in list(self.neighbors.items()):
                 # Verificar se o vizinho já está marcado como inativo
                 if neighbor_info.get("status") == "inactive":
-                    continue  # Ignora o envio de PING para vizinhos já considerados inativos ou para pop's
+                    continue  # Ignora o envio de PING para vizinhos já considerados inativos
 
                 # Verifica o número de tentativas
                 if neighbor_info.get("tentativas", 0) >= 2:
@@ -221,14 +242,6 @@ class Node:
         """
         Implementa a lógica do servidor de dados.
         """
-        # print(f"Data server running on port {self.data_port}")
-        # with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        #     s.bind(('', self.data_port))
-        #     s.listen()
-        #     while True:
-        #         conn, addr = s.accept()
-        #         print(f"Data connection from {addr} established.")
-        #         conn.close()
         pass
 
 ### Função principal para iniciar o nó
@@ -245,11 +258,11 @@ def main():
     bootstrapper = sys.argv[1]
     node_id = sys.argv[2]
     node_ip = sys.argv[3]
-    type = sys.argv[4]
+    node_type = sys.argv[4]
     control_port = 50051  # Porta de controle padrão
     data_port = 50052     # Porta de dados padrão
 
-    node = Node(node_id, node_ip, type, control_port, data_port, bootstrapper)
+    node = Node(node_id, node_ip, node_type, control_port, data_port, bootstrapper)
     node.start()
 
 if __name__ == "__main__":
