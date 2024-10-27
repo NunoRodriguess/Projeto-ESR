@@ -68,7 +68,7 @@ class Node:
                                 "data_port": neighbor.data_port,
                                 "node_type": neighbor.node_type,
                                 "status": "active",
-                                "tentativas": 0
+                                "failed-attempts": 0
                             }
                     print(f"Node {self.node_id} neighbors: {self.neighbors}")
                     # Após o registro, notifica os vizinhos sobre o registro
@@ -172,7 +172,7 @@ class Node:
                         "control_port": control_port,
                         "data_port": data_port,
                         "node_type": node_type,
-                        "tentativas": 0,
+                        "failed-attempts": 0,
                         "status": "active"  # Define o status como ativo
                     }
                     print(f"Added new neighbor: {neighbor_id}")
@@ -188,7 +188,7 @@ class Node:
                     continue  # Ignora o envio de PING para vizinhos já considerados inativos
 
                 # Verifica o número de tentativas
-                if neighbor_info.get("tentativas", 0) >= 2:
+                if neighbor_info.get("failed-attempts", 0) >= 2:
                     print(f"Neighbor {neighbor_info['node_id']} considered inactive due to lack of PONG response.")
                     with self.lock: 
                         neighbor_info["status"] = "inactive"
@@ -213,14 +213,14 @@ class Node:
                                 print(f"Received PONG from neighbor {response_message.node_id}")
                                 # Resetamos as tentativas falhas em caso de resposta
                                 with self.lock: 
-                                    neighbor_info["tentativas"] = 0
+                                    neighbor_info["failed-attempts"] = 0
                                     neighbor_info["status"] = "active"
 
                 except Exception as e:
                     # Incrementa o contador de tentativas falhas
                     print(f"Failed to send PING to neighbor {neighbor_info['node_id']}: {e}")
                     with self.lock: 
-                        neighbor_info["tentativas"] = neighbor_info.get("tentativas", 0) + 1
+                        neighbor_info["failed-attempts"] = neighbor_info.get("failed-attempts", 0) + 1
                     
     # Responder a uma mensagem de ping
     def handle_ping(self, control_message, conn):
@@ -234,7 +234,7 @@ class Node:
         # Reinicia as tentativas falhas do nó que enviou o PING
         with self.lock:
             if control_message.node_ip in self.neighbors:
-                self.neighbors[control_message.node_ip]["tentativas"] = 0
+                self.neighbors[control_message.node_ip]["failed-attempts"] = 0
                 self.neighbors[control_message.node_ip]["status"] = "active"
     
     ### Funcionalidades de comunicação de dados
