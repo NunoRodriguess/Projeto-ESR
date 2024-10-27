@@ -82,8 +82,7 @@ class Node:
         self.register_with_bootstrapper()
         threading.Thread(target=self.control_server).start()  # Inicia o servidor de controle em uma thread separada
         threading.Thread(target=self.data_server).start()     # Inicia o servidor de dados em uma thread separada
-        if self.type == "node":
-            threading.Thread(target=self.send_ping_to_neighbors).start()  # Enviar PING aos vizinhos
+        threading.Thread(target=self.send_ping_to_neighbors).start()  # Enviar PING aos vizinhos
 
 
     ### Funcionalidades de comunicação de controle
@@ -153,7 +152,7 @@ class Node:
             
             for neighbor_ip, neighbor_info in list(self.neighbors.items()):
                 # Verificar se o vizinho já está marcado como inativo
-                if neighbor_info.get("status") == "inactive" or neighbor_info.get("node_type") == "pop":
+                if neighbor_info.get("status") == "inactive":
                     continue  # Ignora o envio de PING para vizinhos já considerados inativos ou para pop's
 
                 # Verifica o número de tentativas
