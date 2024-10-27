@@ -46,13 +46,14 @@ class Client:
                     print(f"Client {self.client_id} registered")
                     self.neighbors.clear()  # Limpa vizinhos antigos em caso de reativação
                     for neighbor in response_message.neighbors:
-                        self.neighbors[neighbor.node_ip] = {
-                            "node_id": neighbor.node_id,
-                            "control_port": neighbor.control_port,
-                            "data_port": neighbor.data_port,
-                            "node_type": neighbor.node_type,
-                            "tentativas": 0
-                        }
+                        with self.lock: 
+                            self.neighbors[neighbor.node_ip] = {
+                                "node_id": neighbor.node_id,
+                                "control_port": neighbor.control_port,
+                                "data_port": neighbor.data_port,
+                                "node_type": neighbor.node_type,
+                                "tentativas": 0
+                            }
                     print(f"Client {self.client_id} Pop's: {self.neighbors}")
                     # Após o registro, notifica os vizinhos sobre o registro
                     self.notify_neighbors_registration()
@@ -138,15 +139,23 @@ class Client:
         control_port = control_message.control_port
         data_port = control_message.data_port
         node_type = control_message.node_type
-        # Armazena as informações do vizinho na estrutura do nó
-        self.neighbors[neighbor_ip] = {
-            "node_id": neighbor_id,
-            "control_port": control_port,
-            "data_port": data_port,
-            "node_type": node_type,
-            "tentativas": 0
-        }
-        print(f"Updated neighbors: {self.neighbors}")
+        
+        with self.lock: 
+                # Se o vizinho já estiver na lista, atualiza o status
+                if neighbor_ip in self.neighbors:
+                    self.neighbors[neighbor_ip]["status"] = "active"
+                    print(f"Updated status of existing neighbor {neighbor_id} to active.")
+                else:
+                    # Armazena as informações do vizinho se ele não estiver presente
+                    self.neighbors[neighbor_ip] = {
+                        "node_id": neighbor_id,
+                        "control_port": control_port,
+                        "data_port": data_port,
+                        "node_type": node_type,
+                        "tentativas": 0,
+                        "status": "active"  # Define o status como ativo
+                    }
+                    print(f"Added new neighbor: {neighbor_id}")
         
     def send_ping_to_neighbors(self):
         while True:
@@ -160,7 +169,8 @@ class Client:
                 # Verifica o número de tentativas
                 if neighbor_info.get("tentativas", 0) >= 2:
                     print(f"Neighbor {neighbor_info['node_id']} considered inactive due to lack of PONG response.")
-                    neighbor_info["status"] = "inactive"
+                    with self.lock:
+                        neighbor_info["status"] = "inactive"
                     self.notify_bootstrapper_inactive(neighbor_ip)  # Notifica o Bootstrapper
                     continue  # Ignora o envio de PING para vizinhos já considerados inativos
 
@@ -182,8 +192,9 @@ class Client:
                             if response_message.type == ControlMessage.PONG:
                                 print(f"Received PONG from neighbor {response_message.node_id}")
                                 # Resetamos as tentativas falhas em caso de resposta
-                                neighbor_info["tentativas"] = 0
-                                neighbor_info["status"] = "active"
+                                with self.lock:
+                                    neighbor_info["tentativas"] = 0
+                                    neighbor_info["status"] = "active"
 
                 except Exception as e:
                     # Incrementa o contador de tentativas falhas
@@ -213,8 +224,9 @@ class Client:
         # Reinicia as tentativas falhas do nó que enviou o PING
         with self.lock:
             if control_message.node_ip in self.neighbors:
-                self.neighbors[control_message.node_ip]["tentativas"] = 0
-                self.neighbors[control_message.node_ip]["status"] = "active"
+                with self.lock:
+                    self.neighbors[control_message.node_ip]["tentativas"] = 0
+                    self.neighbors[control_message.node_ip]["status"] = "active"
                 
     def data_server(self):
         """

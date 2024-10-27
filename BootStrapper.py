@@ -39,9 +39,6 @@ class Bootstrapper:
 
                 if control_message.type == ControlMessage.REGISTER:
                     self.handle_register(control_message, conn)
-                    
-                elif control_message.type == ControlMessage.INACTIVE_NODE:
-                    self.handle_inactive_node(control_message)
 
         except Exception as e:
             print(f"Error handling connection: {e}")
@@ -72,7 +69,7 @@ class Bootstrapper:
         # Adiciona os vizinhos ativos à resposta
         if node_ip in self.neighbors_config:
             for neighbor_id, neighbor_ip in self.neighbors_config[node_ip]["neighbors"]:
-                if neighbor_ip in self.nodes and self.nodes[neighbor_ip]['status'] == 'active':
+                if neighbor_ip in self.nodes:
                     neighbor_info = NeighborInfo()
                     neighbor_info.node_id = neighbor_id
                     neighbor_info.node_ip = neighbor_ip
@@ -82,15 +79,6 @@ class Bootstrapper:
                 
         conn.send(response.SerializeToString())
         print(f"Sent registration confirmation to {node_ip}")
-
-    def handle_inactive_node(self, control_message):
-        """
-        Trata a mensagem de notificação de inatividade de um nó.
-        """
-        neighbor_ip = control_message.node_ip  # IP do nó considerado inativo
-        if neighbor_ip in self.nodes:
-            self.nodes[neighbor_ip]['status'] = 'inactive'  # Marca o nó como inativo
-            print(f"Node {neighbor_ip} marked as inactive.")
 
     def start(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:

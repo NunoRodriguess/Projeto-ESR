@@ -61,13 +61,14 @@ class Node:
                     print(f"Node {self.node_id} registered")
                     self.neighbors.clear()  # Limpa vizinhos antigos para o caso de ser uma reativação
                     for neighbor in response_message.neighbors:
-                        self.neighbors[neighbor.node_ip] = {
-                            "node_id": neighbor.node_id,
-                            "control_port": neighbor.control_port,
-                            "data_port": neighbor.data_port,
-                            "node_type": neighbor.node_type,
-                            "tentativas": 0
-                        }
+                        with self.lock: 
+                            self.neighbors[neighbor.node_ip] = {
+                                "node_id": neighbor.node_id,
+                                "control_port": neighbor.control_port,
+                                "data_port": neighbor.data_port,
+                                "node_type": neighbor.node_type,
+                                "tentativas": 0
+                            }
                     print(f"Node {self.node_id} neighbors: {self.neighbors}")
                     # Após o registro, notifica os vizinhos sobre o registro
                     self.notify_neighbors_registration()
@@ -157,15 +158,24 @@ class Node:
         control_port = control_message.control_port
         data_port = control_message.data_port
         node_type = control_message.node_type
-        # Armazena as informações do vizinho na estrutura do nó
-        self.neighbors[neighbor_ip] = {
-            "node_id": neighbor_id,
-            "control_port": control_port,
-            "data_port": data_port,
-            "node_type": node_type,
-            "tentativas": 0
-        }
-        print(f"Updated neighbors: {self.neighbors}")
+    
+        with self.lock: 
+                # Se o vizinho já estiver na lista, atualiza o status
+                if neighbor_ip in self.neighbors:
+                    self.neighbors[neighbor_ip]["status"] = "active"
+                    print(f"Updated status of existing neighbor {neighbor_id} to active.")
+                else:
+                    # Armazena as informações do vizinho se ele não estiver presente
+                    self.neighbors[neighbor_ip] = {
+                        "node_id": neighbor_id,
+                        "control_port": control_port,
+                        "data_port": data_port,
+                        "node_type": node_type,
+                        "tentativas": 0,
+                        "status": "active"  # Define o status como ativo
+                    }
+                    print(f"Added new neighbor: {neighbor_id}")
+                print(f"Node {self.node_id} neighbors: {self.neighbors}")
         
     def send_ping_to_neighbors(self):
         while True:
@@ -179,8 +189,8 @@ class Node:
                 # Verifica o número de tentativas
                 if neighbor_info.get("tentativas", 0) >= 2:
                     print(f"Neighbor {neighbor_info['node_id']} considered inactive due to lack of PONG response.")
-                    neighbor_info["status"] = "inactive"
-                    self.notify_bootstrapper_inactive(neighbor_ip)  # Notifica o Bootstrapper
+                    with self.lock: 
+                        neighbor_info["status"] = "inactive"
                     continue  # Ignora o envio de PING para vizinhos já considerados inativos
 
                 try:
@@ -201,25 +211,15 @@ class Node:
                             if response_message.type == ControlMessage.PONG:
                                 print(f"Received PONG from neighbor {response_message.node_id}")
                                 # Resetamos as tentativas falhas em caso de resposta
-                                neighbor_info["tentativas"] = 0
-                                neighbor_info["status"] = "active"
+                                with self.lock: 
+                                    neighbor_info["tentativas"] = 0
+                                    neighbor_info["status"] = "active"
 
                 except Exception as e:
                     # Incrementa o contador de tentativas falhas
                     print(f"Failed to send PING to neighbor {neighbor_info['node_id']}: {e}")
-                    neighbor_info["tentativas"] = neighbor_info.get("tentativas", 0) + 1
-
-
-    # Notifica o Bootstrapper que o nó está inativo
-    def notify_bootstrapper_inactive(self, neighbor_ip):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.connect(self.bootstrapper)  # Conecta ao Bootstrapper
-            inactive_message = ControlMessage()
-            inactive_message.type = ControlMessage.INACTIVE_NODE
-            inactive_message.node_ip = neighbor_ip 
-            s.send(inactive_message.SerializeToString())
-            print(f"Notified bootstrapper about inactive neighbor {neighbor_ip}")
-
+                    with self.lock: 
+                        neighbor_info["tentativas"] = neighbor_info.get("tentativas", 0) + 1
                     
     # Responder a uma mensagem de ping
     def handle_ping(self, control_message, conn):
