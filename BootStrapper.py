@@ -58,7 +58,6 @@ class Bootstrapper:
             "control_port": control_port,
             "data_port": data_port,
             "node_type": node_type,
-            "status": "active" 
         }
         print(f"Registered node {node_id} at {node_ip}:{control_port}")
 
