@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package rtp;
+
+//Conexão, acho necessário
+message RTPSetup {
+  string stream_id = 1;
+  string server_ip = 2;
+  int32 server_port = 3;
+  string client_ip = 4;
+  int32 client_port = 5;
+  int32 packet_size = 6;
+  string codec = 7;
+}
+
+//Transporte
+message RTPPacket {
+  string stream_id = 1;
+  int32 sequence_number = 2;
+  int64 timestamp = 3; //Para sincronização do audio com o video
+  bytes payload = 4;
+}
+
+//Vi na net que é usado, como a stream é live fica um bocado estranho, mas acho que pode vir a fazer sentido, tipo pausa e depois volta a dar o live, perdendo-se a parte do meio
+message RTPControl {
+  enum ControlType {
+    PLAY = 0;
+    PAUSE = 1;
+    STOP = 2;
+  }
+  string stream_id = 1;
+  ControlType type = 2;
+}
