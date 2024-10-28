@@ -10,7 +10,7 @@ class Node:
     O nó registra-se em um Bootstrapper e mantém conexões com seus vizinhos.
     """
     
-    def __init__(self, node_id, node_ip, node_type, control_port=5001, data_port=5002, bootstrapper_host='localhost', bootstrapper_port=5000):
+    def __init__(self, node_id, node_ip, node_type, control_port=50051, data_port=50052, bootstrapper_host='localhost', bootstrapper_port=5000):
         """
         Inicializa um nó com identificador e portas específicas.
 
@@ -243,7 +243,25 @@ class Node:
         """
         Implementa a lógica do servidor de dados.
         """
-        pass
+        if self.node_type == "pop":
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.bind(('', self.data_port))
+                while True:
+                    self.listen_for_client(s)
+
+    def listen_for_client(self, s):
+        """ Escuta mensagens dos clientes e responde com ACK """
+        while True:
+            try:
+                message, client_address = s.recvfrom(1024)
+                print(f"Message received from client {client_address}: {message.decode('utf-8')}")
+
+                # Enviar ACK de volta para o cliente
+                s.sendto(b'ACK', client_address)
+                print(f"ACK sent to client {client_address}")
+
+            except Exception as e:
+                print(f"Error in receiving message: {e}")                
 
 ### Função principal para iniciar o nó
 

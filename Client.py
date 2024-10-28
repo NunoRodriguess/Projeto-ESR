@@ -4,6 +4,14 @@ import time
 import sys
 from control_protocol_pb2 import ControlMessage
 
+#
+#
+#
+# COMENTEI FUNÇÃO DE NOTIFICAÇÃO DE NÓ INATIVO, AINDA NÃO FOI DEFINIDA NO BOOT, NÃO ESTÁ A SER USADA #
+#
+#
+#
+
 class Client:
     def __init__(self, client_id, client_ip, bootstrapper_host='localhost', bootstrapper_port=5000):
         self.client_id = client_id
@@ -172,7 +180,7 @@ class Client:
                     print(f"Neighbor {neighbor_info['node_id']} considered inactive due to lack of PONG response.")
                     with self.lock:
                         neighbor_info["status"] = "inactive"
-                    self.notify_bootstrapper_inactive(neighbor_ip)  # Notifica o Bootstrapper
+                    #self.notify_bootstrapper_inactive(neighbor_ip)  # Notifica o Bootstrapper
                     continue  # Ignora o envio de PING para vizinhos já considerados inativos
 
                 try:
@@ -200,18 +208,8 @@ class Client:
                 except Exception as e:
                     # Incrementa o contador de tentativas falhas
                     print(f"Failed to send PING to neighbor {neighbor_info['node_id']}: {e}")
-                    neighbor_info["failed-attempts"] = neighbor_info.get("failed-attempts", 0) + 1
-                    
-    # Notifica o Bootstrapper que o nó está inativo
-    def notify_bootstrapper_inactive(self, neighbor_ip):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.connect(self.bootstrapper)  # Conecta ao Bootstrapper
-            inactive_message = ControlMessage()
-            inactive_message.type = ControlMessage.INACTIVE_NODE
-            inactive_message.node_ip = neighbor_ip 
-            s.send(inactive_message.SerializeToString())
-            print(f"Notified bootstrapper about inactive neighbor {neighbor_ip}")
-
+                    with self.lock:
+                        neighbor_info["failed-attempts"] = neighbor_info.get("failed-attempts", 0) + 1
                     
     # Responder a uma mensagem de ping
     def handle_ping(self, control_message, conn):
@@ -225,7 +223,6 @@ class Client:
         # Reinicia as tentativas falhas do nó que enviou o PING
         with self.lock:
             if control_message.node_ip in self.neighbors:
-                with self.lock:
                     self.neighbors[control_message.node_ip]["failed-attempts"] = 0
                     self.neighbors[control_message.node_ip]["status"] = "active"
                 
@@ -233,7 +230,35 @@ class Client:
         """
         Implementa a lógica do servidor de dados.
         """
-        pass
+        while True:
+            time.sleep(10)
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.settimeout(3)
+                for neighbor_ip, neighbor_info in self.neighbors.items():
+                    message = "Hello PoP, I'm using UDP, send ACK or die..."
+                    if neighbor_info.get("status") == "inactive":
+                        continue
+                    self.send_with_ack(s, message, (neighbor_ip, neighbor_info['data_port']))
+                    
+
+    def send_with_ack(self, s, message, address, retries=3):
+        """ Envia uma mensagem ao PoP e espera um ACK """
+        attempt = 0
+        while attempt < retries:
+            try:
+                s.sendto(message.encode('utf-8'), address)
+                print(f"Message sent to {address}: '{message}' - waiting for ACK...")
+
+                ack, _ = s.recvfrom(1024)
+                if ack == b'ACK':
+                    print("ACK received from PoP.")
+                    return True
+            except socket.timeout:
+                attempt += 1
+                print(f"No ACK received, retrying ({attempt}/{retries})...")
+
+        print("Failed to receive ACK after multiple attempts.")
+        return False
 
 def main():
     """
