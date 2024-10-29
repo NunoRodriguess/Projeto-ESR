@@ -1,36 +1,29 @@
 import socket
 import threading
-import sys
 import time
+import sys
 from control_protocol_pb2 import ControlMessage
 
-class Node:
-    """
-    Classe Node que representa um nó em uma rede P2P.
-    O nó registra-se em um Bootstrapper e mantém conexões com seus vizinhos.
-    """
-    
-    def __init__(self, node_id, node_ip, node_type, control_port=50051, data_port=50052, bootstrapper_host='localhost', bootstrapper_port=5000):
-        """
-        Inicializa um nó com identificador e portas específicas.
+#
+#
+#
+# COMENTEI FUNÇÃO DE NOTIFICAÇÃO DE NÓ INATIVO, AINDA NÃO FOI DEFINIDA NO BOOT, NÃO ESTÁ A SER USADA #
+#
+#
+#
 
-        :node_id: Identificador único do nó.
-        :control_port: Porta de controle para comunicação entre nós.
-        :data_port: Porta para transmissão de dados.
-        :bootstrapper_host: Endereço do Bootstrapper para o registro.
-        :bootstrapper_port: Porta do Bootstrapper para o registro.
-        """
-        self.node_ip = node_ip
-        self.node_id = node_id
-        self.control_port = control_port
-        self.data_port = data_port
-        self.neighbors = {}  # Dicionário para armazenar informações dos vizinhos
+class Client:
+    def __init__(self, client_id, client_ip, bootstrapper_host='localhost', bootstrapper_port=5000):
+        self.client_id = client_id
+        self.client_ip = client_ip
         self.bootstrapper = (bootstrapper_host, bootstrapper_port)
+        self.neighbors = {}  # Armazena informações dos vizinhos (PoPs)
+        self.control_port = 5001  # Porta de controle do cliente
+        self.data_port = 5002     # Porta de dados do cliente
+        self.node_type = "client"
         self.lock = threading.Lock()  # Lock para sincronizar o acesso aos vizinhos
-        self.node_type = node_type
 
-    ### Funcionalidades de registro com o Bootstrapper
-
+        
     def register_with_bootstrapper(self):
         """
         Registra o nó com o Bootstrapper e recebe uma lista de vizinhos.
@@ -42,8 +35,8 @@ class Node:
             # Cria a mensagem de controle para registro
             control_message = ControlMessage()
             control_message.type = ControlMessage.REGISTER
-            control_message.node_id = self.node_id
-            control_message.node_ip = self.node_ip
+            control_message.node_id = self.client_id
+            control_message.node_ip = self.client_ip
             control_message.control_port = self.control_port
             control_message.data_port = self.data_port
             control_message.node_type = self.node_type
@@ -58,8 +51,8 @@ class Node:
                 response_message.ParseFromString(data)
                 
                 if response_message.type == ControlMessage.REGISTER_RESPONSE:
-                    print(f"Node {self.node_id} registered")
-                    self.neighbors.clear()  # Limpa vizinhos antigos para o caso de ser uma reativação
+                    print(f"Client {self.client_id} registered")
+                    self.neighbors.clear()  # Limpa vizinhos antigos em caso de reativação
                     for neighbor in response_message.neighbors:
                         with self.lock: 
                             self.neighbors[neighbor.node_ip] = {
@@ -70,7 +63,7 @@ class Node:
                                 "status": "active",
                                 "failed-attempts": 0
                             }
-                    print(f"Node {self.node_id} neighbors: {self.neighbors}")
+                    print(f"Client {self.client_id} Pop's: {self.neighbors}")
                     # Após o registro, notifica os vizinhos sobre o registro
                     self.notify_neighbors_registration()
                 else:
@@ -86,8 +79,8 @@ class Node:
                     s.connect((neighbor_ip, neighbor_info['control_port']))
                     notify_message = ControlMessage()
                     notify_message.type = ControlMessage.UPDATE_NEIGHBORS
-                    notify_message.node_id = self.node_id
-                    notify_message.node_ip = self.node_ip
+                    notify_message.node_id = self.client_id
+                    notify_message.node_ip = self.client_ip
                     notify_message.control_port = self.control_port
                     notify_message.data_port = self.data_port
                     notify_message.node_type = self.node_type
@@ -96,21 +89,17 @@ class Node:
 
             except Exception as e:
                 print(f"Failed to notify neighbor {neighbor_info['node_id']}: {e}")
-
-    ### Funcionalidades de inicialização do nó
-
+                
     def start(self):
         """
-        Inicia o nó, registrando-o com o Bootstrapper e iniciando os servidores
-        de controle e dados em threads separadas.
+        Função principal do cliente que inicia a solicitação de vizinhos.
         """
         self.register_with_bootstrapper()
         threading.Thread(target=self.control_server).start()  # Inicia o servidor de controle em uma thread separada
         threading.Thread(target=self.data_server).start()     # Inicia o servidor de dados em uma thread separada
         threading.Thread(target=self.send_ping_to_neighbors).start()  # Enviar PING aos vizinhos
 
-    ### Funcionalidades de comunicação de controle
-
+        
     def control_server(self):
         """
         Inicia o servidor de controle que escuta em uma porta específica para conexões de outros nós.
@@ -119,7 +108,7 @@ class Node:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(('', self.control_port))
             s.listen()
-            print(f"Node {self.node_id} listening on control port {self.control_port}")
+            print(f"Client {self.client_id} listening on control port {self.control_port}")
             while True:
                 conn, addr = s.accept()
                 threading.Thread(target=self.handle_control_connection, args=(conn, addr)).start()
@@ -151,7 +140,7 @@ class Node:
                     # Enviar ping aos vizinhos (só para os nodes)
                     if control_message.type == ControlMessage.PING:
                         self.handle_ping(control_message, conn)
-
+                        
     def handle_update_neighbors(self, control_message):
         print(f"Updating neighbors with {control_message.node_id}")
         neighbor_id = control_message.node_id
@@ -159,7 +148,7 @@ class Node:
         control_port = control_message.control_port
         data_port = control_message.data_port
         node_type = control_message.node_type
-    
+        
         with self.lock: 
                 # Se o vizinho já estiver na lista, atualiza o status
                 if neighbor_ip in self.neighbors:
@@ -172,11 +161,10 @@ class Node:
                         "control_port": control_port,
                         "data_port": data_port,
                         "node_type": node_type,
-                        "failed-attempts": 0,
+                        "tentativas": 0,
                         "status": "active"  # Define o status como ativo
                     }
                     print(f"Added new neighbor: {neighbor_id}")
-                print(f"Node {self.node_id} neighbors: {self.neighbors}")
         
     def send_ping_to_neighbors(self):
         while True:
@@ -190,8 +178,9 @@ class Node:
                 # Verifica o número de tentativas
                 if neighbor_info.get("failed-attempts", 0) >= 2:
                     print(f"Neighbor {neighbor_info['node_id']} considered inactive due to lack of PONG response.")
-                    with self.lock: 
+                    with self.lock:
                         neighbor_info["status"] = "inactive"
+                    #self.notify_bootstrapper_inactive(neighbor_ip)  # Notifica o Bootstrapper
                     continue  # Ignora o envio de PING para vizinhos já considerados inativos
 
                 try:
@@ -199,8 +188,8 @@ class Node:
                         s.connect((neighbor_ip, neighbor_info['control_port']))
                         ping_message = ControlMessage()
                         ping_message.type = ControlMessage.PING
-                        ping_message.node_ip = self.node_ip
-                        ping_message.node_id = self.node_id
+                        ping_message.node_ip = self.client_ip
+                        ping_message.node_id = self.client_id
                         s.send(ping_message.SerializeToString())
                         print(f"Sent PING to neighbor {neighbor_info['node_id']}")
 
@@ -212,14 +201,14 @@ class Node:
                             if response_message.type == ControlMessage.PONG:
                                 print(f"Received PONG from neighbor {response_message.node_id}")
                                 # Resetamos as tentativas falhas em caso de resposta
-                                with self.lock: 
+                                with self.lock:
                                     neighbor_info["failed-attempts"] = 0
                                     neighbor_info["status"] = "active"
 
                 except Exception as e:
                     # Incrementa o contador de tentativas falhas
                     print(f"Failed to send PING to neighbor {neighbor_info['node_id']}: {e}")
-                    with self.lock: 
+                    with self.lock:
                         neighbor_info["failed-attempts"] = neighbor_info.get("failed-attempts", 0) + 1
                     
     # Responder a uma mensagem de ping
@@ -227,62 +216,65 @@ class Node:
         print(f"Received PING from neighbor {control_message.node_id}")
         pong_message = ControlMessage()
         pong_message.type = ControlMessage.PONG
-        pong_message.node_id = self.node_id
+        pong_message.node_id = self.client_id
         conn.send(pong_message.SerializeToString())
         print(f"Sent PONG to neighbor {control_message.node_id}")
         
         # Reinicia as tentativas falhas do nó que enviou o PING
         with self.lock:
             if control_message.node_ip in self.neighbors:
-                self.neighbors[control_message.node_ip]["failed-attempts"] = 0
-                self.neighbors[control_message.node_ip]["status"] = "active"
-    
-    ### Funcionalidades de comunicação de dados
-
+                    self.neighbors[control_message.node_ip]["failed-attempts"] = 0
+                    self.neighbors[control_message.node_ip]["status"] = "active"
+                
     def data_server(self):
         """
         Implementa a lógica do servidor de dados.
         """
-        if self.node_type == "pop":
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                s.bind(('', self.data_port))
-                while True:
-                    self.listen_for_client(s)
-
-    def listen_for_client(self, s):
-        """ Escuta mensagens dos clientes e responde com ACK """
         while True:
+            time.sleep(10)
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.settimeout(3)
+                for neighbor_ip, neighbor_info in self.neighbors.items():
+                    message = "Hello PoP, I'm using UDP, send ACK or die..."
+                    if neighbor_info.get("status") == "inactive":
+                        continue
+                    self.send_with_ack(s, message, (neighbor_ip, neighbor_info['data_port']))
+                    
+
+    def send_with_ack(self, s, message, address, retries=3):
+        """ Envia uma mensagem ao PoP e espera um ACK """
+        attempt = 0
+        while attempt < retries:
             try:
-                message, client_address = s.recvfrom(1024)
-                print(f"Message received from client {client_address}: {message.decode('utf-8')}")
+                s.sendto(message.encode('utf-8'), address)
+                print(f"Message sent to {address}: '{message}' - waiting for ACK...")
 
-                # Enviar ACK de volta para o cliente
-                s.sendto(b'ACK', client_address)
-                print(f"ACK sent to client {client_address}")
+                ack, _ = s.recvfrom(1024)
+                if ack == b'ACK':
+                    print("ACK received from PoP.")
+                    return True
+            except socket.timeout:
+                attempt += 1
+                print(f"No ACK received, retrying ({attempt}/{retries})...")
 
-            except Exception as e:
-                print(f"Error in receiving message: {e}")                
-
-### Função principal para iniciar o nó
+        print("Failed to receive ACK after multiple attempts.")
+        return False
 
 def main():
     """
     Função principal para executar o nó.
     Recebe o endereço do Bootstrapper e o ID do nó como parâmetros de linha de comando.
     """
-    if len(sys.argv) != 5:
-        print("Usage: python Node.py <bootstrapper_ip> <node_id> <node_ip> <type(node/pop)>")
+    if len(sys.argv) != 4:
+        print("Usage: python Client.py <bootstrapper_ip> <client_id> <client_ip>")
         sys.exit(1)
 
     bootstrapper = sys.argv[1]
-    node_id = sys.argv[2]
-    node_ip = sys.argv[3]
-    node_type = sys.argv[4]
-    control_port = 50051  # Porta de controle padrão
-    data_port = 50052     # Porta de dados padrão
+    client_id = sys.argv[2]
+    client_ip = sys.argv[3]
 
-    node = Node(node_id, node_ip, node_type, control_port, data_port, bootstrapper)
-    node.start()
-
+    client = Client(client_id, client_ip, bootstrapper)
+    client.start()
+    
 if __name__ == "__main__":
     main()
