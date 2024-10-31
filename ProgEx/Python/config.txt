@@ -1,0 +1,5 @@
+# config.txt
+Node-1 10.0.5.1 | Client-1 10.0.3.20
+Client-1 10.0.3.20 | Node-1 10.0.5.1
+Node-1 10.0.5.1 | Servidor-1 10.0.4.10
+Servidor-1 10.0.4.10 | Node-1 10.0.5.1 

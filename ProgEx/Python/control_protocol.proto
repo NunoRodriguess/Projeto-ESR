@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package node;
+
+message ControlMessage {
+  enum MessageType {
+    REGISTER = 0;
+    REGISTER_RESPONSE = 1;
+    PING = 2;
+    PONG = 3;
+    UPDATE_NEIGHBORS = 4;
+    INACTIVE_NODE = 5;  // Novo tipo de mensagem
+  }
+
+  MessageType type = 1;
+  string node_ip = 2;
+  string node_id = 3;
+  repeated NeighborInfo neighbors = 5;
+  int32 control_port = 6;
+  int32 data_port = 7;
+}
+
+message NeighborInfo {
+  string node_id = 1;
+  string node_ip = 2;
+  int32 control_port = 4;
+  int32 data_port = 5;
+}
+
+message ContentRequest {
+  string content_id = 1;     
+  string client_id = 2;   
+}
+
+message ContentResponse {
+  string content_id = 1;    
+  string source_ip = 2;     
+  int32 source_port = 3;  
+}
