@@ -50,12 +50,14 @@ class Bootstrapper:
         node_ip = control_message.node_ip
         control_port = control_message.control_port
         data_port = control_message.data_port
+        node_type = control_message.node_type
 
         # Registra o nó
         self.nodes[node_ip] = {
             "node_id": node_id,
             "control_port": control_port,
             "data_port": data_port,
+            "node_type": node_type,
         }
         print(f"Registered node {node_id} at {node_ip}:{control_port}")
 
@@ -72,6 +74,8 @@ class Bootstrapper:
                     neighbor_info.node_ip = neighbor_ip
                     neighbor_info.control_port = self.nodes[neighbor_ip]["control_port"]
                     neighbor_info.data_port = self.nodes[neighbor_ip]["data_port"]
+                    neighbor_info.node_type = self.nodes[neighbor_ip]["node_type"]
+
                     response.neighbors.append(neighbor_info) 
                 
         conn.send(response.SerializeToString())
