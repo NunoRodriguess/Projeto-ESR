@@ -4,8 +4,8 @@ from control_protocol_pb2 import ControlMessage
 import time
 import sys
 
-class PoP:
-    def __init__(self, host, rtsp_port, rtp_port, server_addr, server_port, node_id, control_port=50051, data_port=50052, bootstrapper_host='localhost', bootstrapper_port=5000):
+class Node:
+    def __init__(self, host, rtsp_port, rtp_port, server_addr, server_port, node_id, node_type, control_port=50051, data_port=50052, bootstrapper_host='localhost', bootstrapper_port=5000):
         self.host = host
         self.rtsp_port = rtsp_port
         self.rtp_port = rtp_port
@@ -18,13 +18,14 @@ class PoP:
         self.neighbors = {}  # Dicionário para armazenar informações dos vizinhos
         self.bootstrapper = (bootstrapper_host, bootstrapper_port)
         self.lock = threading.Lock()  # Lock para sincronizar o acesso aos vizinhos
-        
+        self.node_type = node_type
+
         # Criação do socket RTSP (TCP) para os clientes
         self.rtsp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.rtsp_socket.bind((self.host, self.rtsp_port))
         self.rtsp_socket.listen(5)
         
-        print(f"RTSP Proxy escutando em {self.host}:{self.rtsp_port}")
+        print(f"RTSP Node escutando em {self.host}:{self.rtsp_port}")
         
         # Criar socket de conexão com o servidor RTSP
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -48,6 +49,7 @@ class PoP:
             control_message.node_ip = self.host
             control_message.control_port = self.control_port
             control_message.data_port = self.data_port
+            control_message.node_type = self.node_type
             
             # Envia a mensagem de registro
             s.send(control_message.SerializeToString())
@@ -67,6 +69,7 @@ class PoP:
                                 "node_id": neighbor.node_id,
                                 "control_port": neighbor.control_port,
                                 "data_port": neighbor.data_port,
+                                "node_type": neighbor.node_type,
                                 "status": "active",
                                 "failed-attempts": 0
                             }
@@ -90,6 +93,7 @@ class PoP:
                     notify_message.node_ip = self.host
                     notify_message.control_port = self.control_port
                     notify_message.data_port = self.data_port
+                    notify_message.node_type = self.node_type
                     s.send(notify_message.SerializeToString())
                     print(f"Notified neighbor {neighbor_info['node_id']} of registration.")
 
@@ -97,7 +101,6 @@ class PoP:
                 print(f"Failed to notify neighbor {neighbor_info['node_id']}: {e}")
 
     ### Funcionalidades de inicialização do nó
-
     def start(self):
         """
         Inicia o nó, registrando-o com o Bootstrapper e iniciando os servidores
@@ -110,7 +113,6 @@ class PoP:
         threading.Thread(target=self.send_ping_to_neighbors).start()  # Enviar PING aos vizinhos
 
     ### Funcionalidades de comunicação de controle
-
     def control_server(self):
         """
         Inicia o servidor de controle que escuta em uma porta específica para conexões de outros nós.
@@ -158,6 +160,7 @@ class PoP:
         neighbor_ip = control_message.node_ip
         control_port = control_message.control_port
         data_port = control_message.data_port
+        node_type = control_message.node_type
     
         with self.lock: 
                 # Se o vizinho já estiver na lista, atualiza o status
@@ -170,6 +173,7 @@ class PoP:
                         "node_id": neighbor_id,
                         "control_port": control_port,
                         "data_port": data_port,
+                        "node_type": node_type,
                         "failed-attempts": 0,
                         "status": "active"  # Define o status como ativo
                     }
@@ -218,10 +222,10 @@ class PoP:
                     # Incrementa o contador de tentativas falhas
                     print(f"Failed to send PING to neighbor {neighbor_info['node_id']}: {e}")
                     with self.lock: 
-                        neighbor_info["failed-attempts"] = neighbor_info.get("failed-attempts", 0) + 1
-                    
-    # Responder a uma mensagem de ping
+                        neighbor_info["failed-attempts"] = neighbor_info.get("failed-attempts", 0) + 1                 
+
     def handle_ping(self, control_message, conn):
+        # Responder a uma mensagem de ping
         print(f"Received PING from neighbor {control_message.node_id}")
         pong_message = ControlMessage()
         pong_message.type = ControlMessage.PONG
@@ -250,8 +254,11 @@ class PoP:
                     break
                 print(f"Requisição recebida do cliente:\n{request}")
                 
+                request_lines = request.split('\n')
+                session_index = int(request_lines[3].split(' ')[1])
+
                 # Adicionar informações do node antes de enviar ao servidor
-                request += f"Node-RTP-Port: {self.rtp_port}\nNode-RTP-IP: {self.host}\n" 
+                request += f"Node-RTP-Port: {self.rtp_port + session_index}\nNode-RTP-IP: {self.host}\n" 
                 
                 # Enviar requisição ao servidor RTSP
                 self.server_socket.send(request.encode())
@@ -268,7 +275,7 @@ class PoP:
                     request_lines = request.split('\n')
                     client_rtp_port = int(request_lines[2].split(' ')[3])  # Extrair a porta RTP do cliente
                     self.client_info[client_address] = {'rtp_port': client_rtp_port, 'ip': client_address[0]}
-                    threading.Thread(target=self.forward_rtp, args=(client_address[0], client_rtp_port)).start()
+                    threading.Thread(target=self.forward_rtp, args=(client_address[0], client_rtp_port, session_index)).start()
                 
             except Exception as e:
                 print(f"Ocorreu um erro: {e}")
@@ -278,10 +285,10 @@ class PoP:
         if client_address in self.client_info:
             del self.client_info[client_address]  # Remover informações do cliente após desconexão
 
-    def forward_rtp(self, client_ip, client_rtp_port):
+    def forward_rtp(self, client_ip, client_rtp_port, session_index):
         # Criar um socket UDP para receber os pacotes RTP do servidor
         rtp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        rtp_socket.bind((self.host, self.rtp_port))  # Porta do proxy
+        rtp_socket.bind((self.host, self.rtp_port + session_index))  # Porta do proxy
 
         print(f"Encaminhando RTP para o cliente {client_ip}:{client_rtp_port}")
         
@@ -295,17 +302,18 @@ class PoP:
 
 def main():
     
-    if len(sys.argv) != 4:
-        print("Usage: python PoP.py <bootstrapper_ip> <node_id> <node_ip>")
+    if len(sys.argv) != 5:
+        print("Usage: python PoP.py <bootstrapper_ip> <node_id> <node_ip> <node_type>")
         sys.exit(1)
         
     bootstrapper = sys.argv[1] # 10.0.5.10
     node_id = sys.argv[2]  #  Node-1
     node_ip = sys.argv[3] # 10.0.5.1
+    node_type = sys.argv[4] # pop/node
     control_port = 50051  # Porta de controle padrão
     data_port = 50052     # Porta de dados padrão
 
-    node = PoP(node_ip, 30001, 25001, '10.0.4.10', 30000, node_id, control_port, data_port, bootstrapper)
+    node = Node(node_ip, 30001, 25001, '10.0.4.10', 30000, node_id, node_type, control_port, data_port, bootstrapper)
     node.start()
 
 if __name__ == "__main__":
