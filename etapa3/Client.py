@@ -290,12 +290,12 @@ def main():
         print("Usage: python Client.py <bootstrapper_ip> <client_id> <client_ip>")
         sys.exit(1)
 
-    bootstrapper = sys.argv[1] # 10.0.5.10
+    bootstrapper = sys.argv[1] # 10.0.1.10
     client_id = sys.argv[2]  # Client-1
-    client_ip = sys.argv[3] # 10.0.3.20
+    client_ip = sys.argv[3] # 10.0.0.20
     
     root = Tk()
-    client = Client(root, '10.0.5.1', 30001, 25000, 'teste.MOV', client_id, client_ip, bootstrapper)
+    client = Client(root, '10.0.0.1', 30001, 25000, 'movie.Mjpeg', client_id, client_ip, bootstrapper)
     root.mainloop()
     
 if __name__ == "__main__":

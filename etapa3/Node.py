@@ -306,14 +306,14 @@ def main():
         print("Usage: python PoP.py <bootstrapper_ip> <node_id> <node_ip> <node_type>")
         sys.exit(1)
         
-    bootstrapper = sys.argv[1] # 10.0.5.10
+    bootstrapper = sys.argv[1] # 10.0.1.10
     node_id = sys.argv[2]  #  Node-1
-    node_ip = sys.argv[3] # 10.0.5.1
+    node_ip = sys.argv[3] # 10.0.0.1
     node_type = sys.argv[4] # pop/node
     control_port = 50051  # Porta de controle padrão
     data_port = 50052     # Porta de dados padrão
 
-    node = Node(node_ip, 30001, 25001, '10.0.4.10', 30000, node_id, node_type, control_port, data_port, bootstrapper)
+    node = Node(node_ip, 30001, 25001, '10.0.2.10', 30000, node_id, node_type, control_port, data_port, bootstrapper)
     node.start()
 
 if __name__ == "__main__":
