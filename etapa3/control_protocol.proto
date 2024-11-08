@@ -29,6 +29,25 @@ message NeighborInfo {
   int32 data_port = 5;
 }
 
+message FloodingMessage {
+    // Identificador do tipo de mensagem
+    enum MessageType {
+        FLOODING_UPDATE = 0; 
+        ACTIVATE_ROUTE = 1;
+    }
+
+    MessageType type = 1;                // Tipo da mensagem
+    string source_id = 2;                // ID do servidor que está enviando a mensagem
+    repeated string stream_ids = 3;      // ID do fluxo de dados que está sendo transmitido
+    string source_ip = 4;                // IP da origem que está enviando a mensagem
+    string route_state = 5;               // Estado da rota (ativa/inativa)
+    int32 hops = 6;                       // Número de saltos desde o nó de origem
+    int64 timestamp = 7;                 // Timestamp da mensagem
+    int32 control_port = 8;   
+    int32 rtsp_port = 9;  
+    int32 rtp_port = 10;  
+}
+
 message ContentRequest {
   string content_id = 1;     
   string client_id = 2;   

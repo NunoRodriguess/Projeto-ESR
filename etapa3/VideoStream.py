@@ -12,7 +12,15 @@ class VideoStream:
         """Retorna o próximo quadro do vídeo como um array de bytes."""
         success, frame = self.cap.read()  # Lê o próximo quadro
         if not success:
-            return None  # Retorna None se não houver mais quadros
+            # Se o vídeo chegou ao fim, reabra o vídeo e reinicie a contagem de quadros
+            self.cap.release()
+            self.cap = cv2.VideoCapture(self.filename)
+            self.frame_num = 0
+            success, frame = self.cap.read()
+
+            # Se ainda assim não conseguir ler, retorna None (erro de arquivo ou fim real)
+            if not success:
+                return None
 
         self.frame_num += 1
         _, encoded_frame = cv2.imencode('.jpg', frame)  # Codifica o quadro em JPEG para envio
