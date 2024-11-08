@@ -8,7 +8,7 @@ class RtpPacket:
 	def __init__(self):
 		pass
 		
-	def encode(self, version, padding, extension, cc, seqnum, marker, pt, ssrc, payload):
+	def encode(self, version, padding, extension, cc, seqnum, marker, pt, ssrc, payload, filename):
 		"""Encode the RTP packet with header fields and payload."""
 		timestamp = int(time())
 		header = bytearray(HEADER_SIZE) 
@@ -30,12 +30,30 @@ class RtpPacket:
 		header[11] = ssrc & 0xFF
 		# set header and  payload
 		self.header = header
+		if filename:
+			filename_bytes = filename.encode('utf-8')
+			# Incluindo o nome do arquivo no payload antes do vídeo
+			payload = filename_bytes + b'\0' + payload  # Adicionando um terminador null para o filename
+
 		self.payload = payload
-		
+  
 	def decode(self, byteStream):
-		"""Decode the RTP packet."""
+		"""Decode the RTP packet and extract filename if present."""
 		self.header = bytearray(byteStream[:HEADER_SIZE])
 		self.payload = byteStream[HEADER_SIZE:]
+
+		# Tentando extrair o filename do começo do payload, se presente
+		filename = None
+		try:
+			# Procurar por um terminador null no início do payload para separar o filename
+			filename_end_index = self.payload.index(0)  # \0 byte
+			filename = self.payload[:filename_end_index].decode('utf-8')
+			self.payload = self.payload[filename_end_index + 1:]  # Remover filename do payload
+		except ValueError:
+			# Caso não tenha um filename no payload
+			pass
+
+		return filename
 	
 	def version(self):
 		"""Return RTP version."""
@@ -66,5 +84,3 @@ class RtpPacket:
 
 	def printheader(self):
 		print("[RTP Packet] Version: ...")
-
-

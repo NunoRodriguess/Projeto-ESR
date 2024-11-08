@@ -2,6 +2,7 @@ import socket
 import threading
 from control_protocol_pb2 import ControlMessage
 from control_protocol_pb2 import FloodingMessage
+from RtpPacket import RtpPacket
 import time
 import sys
 
@@ -20,8 +21,8 @@ class Node:
         self.node_type = node_type
         
         self.routing_table = {}
-        self.client_session = {}
-        self.OK_200 = 0
+        self.sessions = {} # Vizinhos armazenados por sessões
+        self.neighbors_rtsp = {}  # Para comunicar com os seus vizinhos até ao servidor
 
         # Criação do socket RTSP (TCP)
         self.rtsp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -32,10 +33,7 @@ class Node:
         # Criação do socket RTP (UDP)
         self.rtp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.rtp_socket.bind((self.node_ip, self.rtp_port))
-        
-        # Inicializar vizinhos
-        self.neighbors_rtp = {}  # Para armazenar informações da scoket rtp dos vizinhos que vao receber pacotes
-        self.neighbors_rtsp = {}  # Para armazenar informações da scoket rtsp dos cliente
+    
         
     def register_with_bootstrapper(self):
         """
@@ -340,16 +338,15 @@ class Node:
                 for stream_id in stream_ids:
                     if stream_id in route_info:
                         if route_info[stream_id]['status'] == "active":
-                            if filename not in self.client_session:
-                                self.client_session[filename] = {} 
-                            if flooding_message.source_ip not in self.client_session[stream_id]:
-                                self.client_session[stream_id][flooding_message.source_ip] = {}
+                            if filename not in self.sessions:
+                                self.sessions[filename] = {} 
                             # Adiciona o novo recetor dos videos há sessão
-                            self.client_session[stream_id][flooding_message.source_ip]['rtp_port'] = flooding_message.rtp_port
-                            # O cliente nao manda a sua porta rtsp
+                            if flooding_message.source_ip not in self.sessions[stream_id]:
+                                self.sessions[stream_id][flooding_message.source_ip] = {}
+                            self.sessions[stream_id][flooding_message.source_ip]['rtp_port'] = flooding_message.rtp_port
+                            # O cliente nao manda a sua porta rtsp então é necessário fazer esta confirmação
                             if flooding_message.rtsp_port:
-                                self.client_session[stream_id][flooding_message.source_ip]['rtsp_port'] = flooding_message.rtsp_port
-                            self.client_session[stream_id][flooding_message.source_ip]['session'] = stream_id
+                                self.sessions[stream_id][flooding_message.source_ip]['rtsp_port'] = flooding_message.rtsp_port
                             print(f"Rota já ativa para o fluxo {stream_id} em {dest}. Reutilizando.")
                             return
                         # Caso contrário, encontre a melhor rota
@@ -362,17 +359,16 @@ class Node:
         if best_route:
             with self.lock:
                 self.routing_table[destination][filename]['status'] = "active"
-                if filename not in self.client_session:
-                    self.client_session[filename] = {} 
-                if flooding_message.source_ip not in self.client_session[stream_id]:
-                    self.client_session[stream_id][flooding_message.source_ip] = {}
+                if filename not in self.sessions:
+                    self.sessions[filename] = {} 
+                if flooding_message.source_ip not in self.sessions[stream_id]:
+                    self.sessions[stream_id][flooding_message.source_ip] = {}
                 # Adiciona o novo recetor dos videos há sessão
-                self.client_session[stream_id][flooding_message.source_ip]['rtp_port'] = flooding_message.rtp_port
+                self.sessions[stream_id][flooding_message.source_ip]['rtp_port'] = flooding_message.rtp_port
                 # O cliente nao manda a sua porta rtsp
                 if flooding_message.rtsp_port:
-                    self.client_session[stream_id][flooding_message.source_ip]['rtsp_port'] = flooding_message.rtsp_port
-                self.client_session[stream_id][flooding_message.source_ip]['session'] = stream_id
-
+                    self.sessions[stream_id][flooding_message.source_ip]['rtsp_port'] = flooding_message.rtsp_port
+                    
             print(f"Activating best route to {best_route['source_id']} at {destination} with {min_hops} hops.")
             # Enviar mensagem de ativação para a melhor rota
             try:
@@ -426,71 +422,62 @@ class Node:
                 
                 # Inicializa o dicionario caso nao exista
                 with self.lock:
-                    self.client_session.setdefault(filename, {})
-                    self.client_session[filename].setdefault(neighbor_address[0], {})
+                    self.sessions.setdefault(filename, {})
+                    self.sessions[filename].setdefault(neighbor_address[0], {})
                 
                  # Status inicial da rota é sempre INIT
-                if 'status' not in self.client_session[filename][neighbor_address[0]]: 
+                if 'status' not in self.sessions[filename][neighbor_address[0]]: 
                     with self.lock: 
-                        self.client_session[filename][neighbor_address[0]]['status'] = "INIT"
+                        self.sessions[filename][neighbor_address[0]]['status'] = "INIT"
                    
-                neighbor_status = self.client_session[filename][neighbor_address[0]]['status']
+                neighbor_status = self.sessions[filename][neighbor_address[0]]['status']
+                route = self.get_route_with_stream(filename) # Verificar se o node já está a receber dados
                 
-                if "SETUP" in request and neighbor_status == "INIT":
-                    with self.lock: 
-                        self.client_session[filename][neighbor_address[0]]['status'] = "READY"
-                    route = self.get_route_with_stream(filename) # Verificar se o node já está a receber dados
-                    
+                # Preparação para a receção de pacotes do video requisitado
+                if "SETUP" in request and neighbor_status == "INIT": 
                     if route: # Caso esteja a receber
-                        with self.lock: 
-                            self.client_session[filename][neighbor_address[0]]["session"] = filename
                         seq = lines[1].split(' ')[1]
-                        self.replyRtsp(self.OK_200, seq, self.client_session[filename][neighbor_address[0]]['session'], neighbor_socket) # Responde logo ao node com a confirmação
+                        self.replyRtsp(seq, filename, neighbor_socket) # Responde logo ao node com a confirmação
                         
                     else: # Caso contrário
-                        active_route = self.get_active_route(filename)
-                        rtsp_port = active_route['route_info']['rtsp_port']
-                        dest = active_route['destination']
-                        rtsp_socket = self.get_or_create_rtsp_connection(filename, dest, rtsp_port) # Conecta se com o vizinho ativo
-                        self.send_rtsp_request(rtsp_socket, request, neighbor_socket, filename)  # Reencaminha lhe o pedido 
-                           
-                elif "PLAY" in request and neighbor_status == "READY":  
-                    # Atualiza as variaveis da conexão com vizinho que enviou play
+                        dest, rtsp_port = self.forward_request(filename, request, neighbor_socket)
+                        with self.lock: 
+                            self.routing_table[dest][filename]['flow'] = "active"
+                    
+                    # Atualiza as variaveis de quem fez o pedido SETUP
                     with self.lock: 
-                        self.client_session[filename][neighbor_address[0]]['status'] = "PLAYING"
-                        self.client_session[filename][neighbor_address[0]]['flow'] = "YES"
-                    seq = lines[1].split()[1]
-                    if route and self.at_least_one_session_with_flow(filename): # Se o node está a receber dados e já estou a enviar para pelo menos um vizinho
-                        self.replyRtsp(self.OK_200, seq, self.client_session[filename][neighbor_address[0]]['session'], neighbor_socket) # Responde ao node com a confirmação
+                        self.sessions[filename][neighbor_address[0]]['status'] = "READY"
+                    
+                # Inicialização da receção dos pacotes do video requisitos      
+                elif "PLAY" in request and neighbor_status == "READY":  
+                    rtsp_port = None
+                    if route and self.at_least_one_session_with_flow(filename): # Se o node está a receber dados e já estou a enviar a menos um vizinho
+                        seq = lines[1].split()[1]
+                        self.replyRtsp(seq, filename, neighbor_socket) # Responde ao node com a confirmação
                     
                     else:  # Caso contrário
-                        active_route = self.get_active_route(filename)
-                        rtsp_port = active_route['route_info']['rtsp_port']
-                        dest = active_route['destination']
-                        with self.lock: 
-                            self.routing_table[dest][filename]['flow'] = "active" # Atualiza a tabela de routing, agora está a receber dados
-                        rtsp_socket = self.get_or_create_rtsp_connection(filename, dest, rtsp_port) # Conecta se com o vizinho ativo
-                        self.send_rtsp_request(rtsp_socket, request, neighbor_socket, filename)  # Reencaminha lhe o pedido 
-                        
-                    self.handle_rtp_forwarding(request, neighbor_address[0], self.client_session[filename][neighbor_address[0]]['session'], filename)
-                
-                elif "PAUSE" in request and neighbor_status == "PLAYING":   
+                        dest, rtsp_port  = self.forward_request(filename, request, neighbor_socket)
+                       
+                    # Atualiza as variaveis de quem fez o pedido PLAY e começa a enviar lhe os pacotes RTP
                     with self.lock: 
-                        self.client_session[filename][neighbor_address[0]]['status'] = "READY"
-                    seq = lines[1].split(' ')[1]
-                    if self.multiple_sessions_with_flow(filename): # Caso onde há mais que 1 vizinho a receber dados
-                        # Responde ao node com a confirmação
-                        self.replyRtsp(self.OK_200, seq, self.client_session[filename][neighbor_address[0]]['session'], neighbor_socket)
-                        with self.lock: 
-                            self.client_session[filename][neighbor_address[0]]['flow'] = "NO" # Para a receção de dados apenas para este vizinho
-                        
-                    else:  # Caso contrário
-                        active_route = self.get_active_route(filename)
-                        rtsp_port = active_route['route_info']['rtsp_port']
-                        dest = active_route['destination']
-                        rtsp_socket = self.get_or_create_rtsp_connection(filename, dest, rtsp_port) # Conecta se com o vizinho ativo
-                        self.send_rtsp_request(rtsp_socket, request, neighbor_socket, filename)  # Reencaminha lhe o pedido 
+                        self.sessions[filename][neighbor_address[0]]['status'] = "PLAYING"
+                        self.sessions[filename][neighbor_address[0]]['flow'] = "YES"
+                    self.handle_rtp_forwarding(neighbor_address[0], rtsp_port, filename)
                 
+                # Interrupção da receção dos pacotes do video requisitado   
+                elif "PAUSE" in request and neighbor_status == "PLAYING":             
+                    if self.multiple_sessions_with_flow(filename): # Caso onde há mais que 1 vizinho a receber dados
+                        seq = lines[1].split(' ')[1]
+                        self.replyRtsp(seq, filename, neighbor_socket) # Responde ao node com a confirmação
+                                         
+                    else:  # Caso contrário
+                        self.forward_request(filename, request, neighbor_socket)
+                    
+                    with self.lock: 
+                        self.sessions[filename][neighbor_address[0]]['status'] = "READY"
+                        self.sessions[filename][neighbor_address[0]]['flow'] = "NO" # Para a receção de dados apenas para este vizinho
+                
+                # Encerrar a comunicação com o node que fez a requisição do video
                 elif "TEARDOWN" in request:   
                     self.remove_connection(filename, neighbor_address[0], request, neighbor_socket)
                     
@@ -498,11 +485,19 @@ class Node:
                 print(f"Ocorreu um erro: {e}")
                 break
             
+    def forward_request(self,filename,request,neighbor_socket):
+        active_route = self.get_active_route(filename)
+        rtsp_port = active_route['route_info']['rtsp_port']
+        dest = active_route['destination']
+        rtsp_socket = self.get_or_create_rtsp_connection(filename, dest, rtsp_port) # Conecta se com o vizinho ativo
+        self.send_rtsp_request(rtsp_socket, request, neighbor_socket, filename)  # Reencaminha lhe o pedido 
+        return dest , rtsp_port
+        
     def multiple_sessions_with_flow(self, filename):
         count_yes = 0
         # Itera pelos endereços de vizinhos no arquivo especificado
         with self.lock: 
-            for neighbor_address, session_info in self.client_session.get(filename, {}).items():
+            for neighbor_address, session_info in self.sessions.get(filename, {}).items():
                 # Verifica se a chave 'flow' existe e se o valor é "YES"
                 if session_info.get('flow') == "YES":
                     count_yes += 1
@@ -516,7 +511,7 @@ class Node:
         count_yes = 0
         # Itera pelos endereços de vizinhos no arquivo especificado
         with self.lock: 
-            for neighbor_address, session_info in self.client_session.get(filename, {}).items():
+            for neighbor_address, session_info in self.sessions.get(filename, {}).items():
                 # Verifica se a chave 'flow' existe e se o valor é "YES"
                 if session_info.get('flow') == "YES":
                     count_yes += 1
@@ -590,51 +585,46 @@ class Node:
         except Exception as e:
             print(f"Falha ao enviar requisição RTSP: {e}")
 
-    def handle_rtp_forwarding(self, request, neighbor_ip, neighbor_rtp_port, filename):
+    def handle_rtp_forwarding(self, neighbor_ip, neighbor_rtp_port, filename):
         """Inicia o encaminhamento dos pacotes RTP para o vizinho após a requisição SETUP."""
         threading.Thread(target=self.forward_rtp, args=(neighbor_ip, neighbor_rtp_port, filename)).start()
 
     def forward_rtp(self, client_ip, client_rtp_port, filename):
-        print(f"Encaminhando RTP para o cliente {client_ip}:{client_rtp_port}")
-        
-        with self.lock: 
-            for client_ip, client_info in self.client_session[filename].items():
-                if "rtpSocket" not in client_info:
-                    client_info["rtpSocket"] = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                        
+        print(f"Encaminhando RTP para o cliente {client_ip}:{client_rtp_port}")                    
         while True:
             data, addr = self.rtp_socket.recvfrom(20480)
             if data:
+                rtp_packet = RtpPacket()
+                stream_id = rtp_packet.decode(data) # Extrai o nome do video do pacote recebido para saber para quem tem que o reencaminhar
                 with self.lock: 
-                    for client_ip, client_info in self.client_session[filename].items():
-                        if "rtpSocket" in client_info:  # Verifica se o socket está configurado
-                            client_socket = client_info["rtpSocket"]
-                            client_rtp_port = client_info['rtp_port']
-                            if client_info['flow'] == "YES":
-                                print(f"Pacote RTP recebido do vizinho, enviando ao cliente {client_ip}:{client_rtp_port}")
-                                client_socket.sendto(data, (client_ip, client_rtp_port))
-                        else:
-                            print(f"Socket RTP não configurado para o cliente {client_ip}, ignorando.")
+                    for client_ip, client_info in self.sessions[stream_id].items():
+                        if "rtpSocket" not in client_info:
+                            client_info["rtpSocket"] = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                        client_socket = client_info["rtpSocket"]
+                        client_rtp_port = client_info['rtp_port']
+                        if client_info['flow'] == "YES":
+                            print(f"Pacote RTP recebido do vizinho, enviando ao cliente {client_ip}:{client_rtp_port}")
+                            client_socket.sendto(data, (client_ip, client_rtp_port))
              
     def remove_connection(self, filename, neighbor_address, request, neighbor_socket):
         # Verifique se o filename e o cliente existem na sessão
         with self.lock: 
-            if filename in self.client_session and neighbor_address in self.client_session[filename]:
+            if filename in self.sessions and neighbor_address in self.sessions[filename]:
                 # Fecha o socket RTP se ele existir
-                if "rtpSocket" in self.client_session[filename][neighbor_address]:
+                if "rtpSocket" in self.sessions[filename][neighbor_address]:
                     try:
-                        self.client_session[filename][neighbor_address]["rtpSocket"].close()
+                        self.sessions[filename][neighbor_address]["rtpSocket"].close()
                         print(f"RTP socket para {neighbor_address} fechado.")
                     except Exception as e:
                         print(f"Erro ao fechar RTP socket para {neighbor_address}: {e}")
-
+                
                 # Remove o cliente do dicionário
-                self.client_session[filename].pop(neighbor_address)
+                self.sessions[filename].pop(neighbor_address)
                 print(f"Cliente {neighbor_address} removido de {filename}")
 
                 # Se o dicionário do filename está vazio, remova também
-                if not self.client_session[filename]:  # Verifica se não há mais clientes
-                    self.client_session.pop(filename)
+                if not self.sessions[filename]:  # Verifica se não há mais clientes
+                    self.sessions.pop(filename)
                     
                     # Como o node nao tem mais clientes para enviar, avisa o vizinho que o está a enviar pacotes para parar de o fazer
                     active_route = self.get_active_route(filename)
@@ -647,18 +637,10 @@ class Node:
             else:
                 print(f"Cliente {neighbor_address} não encontrado em {filename}")
            
-    def replyRtsp(self, code, seq, session, neighbor_socket):
+    def replyRtsp(self, seq, session, neighbor_socket):
         """Send RTSP reply to the client."""
-        if code == self.OK_200:
-            #print("200 OK")
-            reply = 'RTSP/1.0 200 OK\nCSeq: ' + seq + '\nSession: ' + session
-            neighbor_socket.send(reply.encode())
-        
-        # Error messages
-        elif code == self.FILE_NOT_FOUND_404:
-            print("404 NOT FOUND")
-        elif code == self.CON_ERR_500:
-            print("500 CONNECTION ERROR")
+        reply = 'RTSP/1.0 200 OK\nCSeq: ' + seq + '\nSession: ' + session
+        neighbor_socket.send(reply.encode())
    
 def main():
     

@@ -16,9 +16,10 @@ class Server:
         self.server_type = server_type
         self.server_rtsp_port = server_rtsp_port
         self.neighbors_info = {}
-        self.neighbors_rtsp = None
+        self.rtspSocket = None
         self.movies = {
-            "1" : "movie.Mjpeg"
+            "movie.Mjpeg",
+            "movie-copy.Mjpeg"
         }
 	
     def register_with_bootstrapper(self):
@@ -161,11 +162,8 @@ class Server:
 
     def receive_neighbors_info(self, flooding_message):
         self.neighbors_info.setdefault(flooding_message.source_ip, {})
-        if 'rtsp_port' not in self.neighbors_info[flooding_message.source_ip]:
-            self.neighbors_info[flooding_message.source_ip]['rtsp_port'] = flooding_message.rtsp_port
         if 'rtp_port' not in self.neighbors_info[flooding_message.source_ip]:
             self.neighbors_info[flooding_message.source_ip]['rtp_port'] = flooding_message.rtp_port
-        print(f"INFRMAÇÂO DOS VIZINHSO : {self.neighbors_info}\n")
         threading.Thread(target=self.openRTSP_socket, args=(flooding_message.source_ip,)).start() # Abre socket rtsp    
         
     def handle_update_neighbors(self, control_message):
@@ -271,10 +269,10 @@ class Server:
         flooding_message.type = FloodingMessage.FLOODING_UPDATE
         flooding_message.source_id = self.server_id
         flooding_message.source_ip = self.server_ip
-        flooding_message.stream_ids.extend(self.movies.values())
+        flooding_message.stream_ids.extend(self.movies)
         flooding_message.route_state = "inactive"
-        flooding_message.hops = 0  # Inicie o contador de saltos
         flooding_message.control_port = self.control_port
+        flooding_message.hops = 0  # Inicie o contador de saltos
         flooding_message.rtsp_port = self.server_rtsp_port
 
         for neighbor_ip, neighbor_info in self.neighbors.items():
@@ -289,15 +287,16 @@ class Server:
             
     def openRTSP_socket(self, node_ip):   
  
-        rtspSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        rtspSocket.bind(('', self.server_rtsp_port))
-        rtspSocket.listen(5) 
-        print(f"Server RTSP escutando em :{self.server_rtsp_port}")
+        if self.rtspSocket is None:
+            self.rtspSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.rtspSocket.bind(('', self.server_rtsp_port))
+            self.rtspSocket.listen(5) 
+            print(f"Server RTSP escutando em :{self.server_rtsp_port}")
 
         # Receive client info (address,port) through RTSP/TCP session
         while True:
             neighborInfo = {}
-            neighborInfo['rtspSocket'], neighbor_address = rtspSocket.accept()
+            neighborInfo['rtspSocket'], neighbor_address = self.rtspSocket.accept()
             neighborInfo['rtp_port'] = self.neighbors_info[node_ip]['rtp_port']
             neighborInfo['ip'] = node_ip
             ServerWorker(neighborInfo).run()

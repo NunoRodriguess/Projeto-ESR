@@ -295,14 +295,8 @@ class Client:
 					}
 					
 					print(f"Route updated for stream {stream_id} to {self.routing_table[destination][stream_id]['source_id']} with hops={metric}")
-		
+     
 		print(f"Routing table is updated for streams: {list(flooding_message.stream_ids)}")  
-
-	def get_key_by_value(self, search_value, filename):
-		for key, value in self.routing_table.items():
-			if value[filename]["source_id"] == search_value[filename]["source_id"] and value[filename]["hops"] == search_value[filename]["hops"]:
-				return key
-		return None
 
 	def start_new_session(self):
 		"""
@@ -347,11 +341,10 @@ class Client:
 		with self.lock:
 			for dest, route_info in self.routing_table.items():
 				if filename in route_info:  # Verifica se o fluxo existe na tabela
-					for stream_id, stream_info in route_info.items():
-						if stream_info['hops'] < min_hops:
-							min_hops = stream_info['hops']
-							best_route = stream_info
-							destination = dest
+					if route_info[filename]['hops'] < min_hops:
+						min_hops = route_info[filename]['hops']
+						best_route = route_info[filename]
+						destination = dest
 
 		if best_route:
 			with self.lock:
@@ -392,17 +385,18 @@ class Client:
 
 def main():
     
-    if len(sys.argv) != 4:
-        print("Usage: python Client.py <bootstrapper_ip> <client_id> <client_ip>")
-        sys.exit(1)
+	if len(sys.argv) != 5:
+		print("Usage: python Client.py <bootstrapper_ip> <client_id> <client_ip> <movie>")
+		sys.exit(1)
 
-    bootstrapper = sys.argv[1] # 10.0.1.10
-    client_id = sys.argv[2]  # Client-1
-    client_ip = sys.argv[3] # 10.0.0.20
-    
-    root = Tk()
-    client = Client(root, 25000, 'movie.Mjpeg', client_id, client_ip, bootstrapper)
-    root.mainloop()
+	bootstrapper = sys.argv[1] # 10.0.1.10
+	client_id = sys.argv[2]  # Client-1
+	client_ip = sys.argv[3] # 10.0.0.20
+	filename = sys.argv[4] 
+
+	root = Tk()
+	client = Client(root, 25000, filename, client_id, client_ip, bootstrapper)
+	root.mainloop()
     
 if __name__ == "__main__":
     main()
