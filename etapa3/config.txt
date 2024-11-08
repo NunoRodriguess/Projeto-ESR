@@ -1,5 +1,8 @@
 # config.txt
-Node-1 10.0.5.1 | Client-1 10.0.3.20
-Client-1 10.0.3.20 | Node-1 10.0.5.1
-Node-1 10.0.5.1 | Servidor-1 10.0.4.10
-Servidor-1 10.0.4.10 | Node-1 10.0.5.1 
+Node1 10.0.1.1 | Pop2 10.0.1.2 | Pop1 10.0.2.2 | Servidor1 10.0.0.10
+Pop2 10.0.1.2 | Node1 10.0.1.1 | Pop1 10.0.2.2 
+Pop1 10.0.2.2 | Node1 10.0.1.1 | Pop2 10.0.1.2 | Client1 10.0.6.20 | Client2 10.0.4.20
+Client1 10.0.6.20 | Pop1 10.0.2.2
+Client2 10.0.4.20 | Pop1 10.0.2.2
+Client3 10.0.7.20 | Pop2 10.0.1.2
+Servidor1 10.0.0.10 | Node1 10.0.1.1
