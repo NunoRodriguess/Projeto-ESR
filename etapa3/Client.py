@@ -29,6 +29,10 @@ class Client:
 		# Client details
 		self.client_id = client_id
 		self.client_ip = client_ip
+  
+		#Neighbor details
+		self.destination_ip = None
+		self.destination_rtsp_port = None
 		
 		# Bootstrapper configuration
 		self.bootstrapper = (bootstrapper_host, bootstrapper_port)
@@ -41,6 +45,7 @@ class Client:
 		self.node_type = "client"
 
 		self.routing_table = {}
+		self.video_session = None
 
 		# Connect to server and perform background work
 		self.background()  # Register with the bootstrapper and start background tasks
@@ -118,7 +123,8 @@ class Client:
 		self.register_with_bootstrapper()
 		threading.Thread(target=self.control_server).start()  # Inicia o servidor de controle em uma thread separada
 		threading.Thread(target=self.send_ping_to_neighbors).start()  # Enviar PING aos vizinhos
-		threading.Thread(target=self.start_new_session).start()  # Enviar PING aos vizinhos
+		threading.Thread(target=self.start_new_session).start()  # Thread da sessão de vídeo
+		threading.Thread(target=self.monitor_routes).start()  # Monitor de rotas
 
 	def control_server(self):
 		"""
@@ -170,7 +176,6 @@ class Client:
 							
 							if flooding_message.type == FloodingMessage.FLOODING_UPDATE:
 								self.update_route_table(flooding_message)
-								self.connectToNeighbor()
 			
 							else:
 								raise ValueError(f"Unknown FloodingMessage type: {flooding_message.type}")
@@ -207,7 +212,7 @@ class Client:
 		
 	def send_ping_to_neighbors(self):
 		while True:
-			time.sleep(10)
+			time.sleep(15)
 			
 			for neighbor_ip, neighbor_info in list(self.neighbors.items()):
 				# Verificar se o vizinho já está marcado como inativo
@@ -264,14 +269,14 @@ class Client:
 			if control_message.node_ip in self.neighbors:
 					self.neighbors[control_message.node_ip]["failed-attempts"] = 0
 					self.neighbors[control_message.node_ip]["status"] = "active"
-		
+	
 	def update_route_table(self, flooding_message):
 		"""
 		Atualiza a tabela de rotas com base na mensagem de flooding recebida,
 		agora levando em consideração múltiplos fluxos de vídeo.
 		"""
 		destination = flooding_message.source_ip
-		metric = flooding_message.hops
+		metric = flooding_message.metric
 		
 		# Iterar sobre os fluxos de vídeo (stream_ids) recebidos
 		for stream_id in flooding_message.stream_ids:
@@ -280,76 +285,92 @@ class Client:
 				if destination not in self.routing_table:
 					self.routing_table[destination] = {}
 				
-				# Se a rota para o destino e o fluxo não existirem ou se a métrica for melhor (menor número de hops)
+				# Se a rota para o destino e o fluxo não existirem ou se a métrica for melhor (menor número de metric)
 				if (stream_id not in self.routing_table[destination] or 
-					metric < self.routing_table[destination][stream_id]['hops']):
+					metric < self.routing_table[destination][stream_id]['metric']):
 
 					self.routing_table[destination][stream_id] = {
 						"source_ip": flooding_message.source_ip,
 						"source_id": flooding_message.source_id,
-						"hops": metric,
+						"metric": metric,
 						"status": flooding_message.route_state,
 						"control_port": flooding_message.control_port,
 						"rtsp_port": flooding_message.rtsp_port,
 						"flow": "inactive"
 					}
 					
-					print(f"Route updated for stream {stream_id} to {self.routing_table[destination][stream_id]['source_id']} with hops={metric}")
+					print(f"Route updated for stream {stream_id} to {self.routing_table[destination][stream_id]['source_id']} with metric={metric}")
      
 		print(f"Routing table is updated for streams: {list(flooding_message.stream_ids)}")  
-
-	def start_new_session(self):
+  
+	def monitor_routes(self):
 		"""
-		Tenta ativar a melhor rota repetidamente até que uma rota válida seja encontrada.
+		Monitor de rotas para verificar e ativar a melhor rota continuamente.
 		"""
 		while True:
 			best_route = self.activate_best_route(self.filename)
 			
-			# Se uma rota válida foi encontrada, avança para a criação da sessão
-			if best_route:
-				print("Rota ativa encontrada! Iniciando a sessão.")
-				destination_ip = best_route["source_ip"]
-				destination_rtsp_port = best_route["rtsp_port"]
+			# Caso encontre uma nova rota, atualiza a sessão de vídeo em execução
+			if best_route and self.video_session is not None and best_route["source_ip"] != self.destination_ip :
+				print("Nova rota ativa encontrada! Atualizando a sessão de vídeo.")
+				self.destination_ip = best_route["source_ip"]
+				self.destination_rtsp_port = best_route["rtsp_port"]
 				
-				# Cria a janela da sessão
+				# Atualiza a sessão de vídeo com o novo destino
+				self.video_session.update_destination(self.destination_ip, self.destination_rtsp_port)
+			else:
+				print("Nova tentativa de ativação de rotas em 10 segundos.")	
+			time.sleep(10)  # Verifica a cada 10 segundos
+
+	def start_new_session(self):
+		"""
+		Inicializa a sessão de vídeo com a melhor rota disponível no momento.
+		"""
+		while True:
+			best_route = self.activate_best_route(self.filename)
+			if best_route:
+				self.destination_ip = best_route["source_ip"]
+				self.destination_rtsp_port = best_route["rtsp_port"]
+				print("Iniciando sessão com a melhor rota inicial.")
+				
+				# Cria a janela da sessão de vídeo
 				self.session_window = Toplevel(self.master)
 				self.sessions_frame = Frame(self.master)
 				self.sessions_frame.pack()
 				
-				# Cria a sessão de vídeo
-				video_session = VideoSession(self.session_window, destination_ip, destination_rtsp_port, self.rtp_port, self.filename)
+				# Inicia uma nova sessão de vídeo
+				self.video_session = VideoSession(self.session_window, self.client_ip, self.destination_ip, self.destination_rtsp_port, self.rtp_port, self.filename)
 				
 				# Adiciona um botão para fechar a sessão
-				self.close_button = Button(self.sessions_frame, text=f'Fechar Sessão {best_route["source_id"]}', command=lambda: self.close_session(video_session))
+				self.close_button = Button(self.sessions_frame, text=f'Fechar Sessão {best_route["source_id"]}', command=lambda: self.close_session(self.video_session))
 				self.close_button.pack()
-				break  # Sai do loop quando a sessão é iniciada
+				break # sair do ciclo 
 			else:
-				# Se não encontrar uma rota ativa, aguarda 5 segundos antes de tentar novamente
-				print("Nenhuma rota ativa disponível para iniciar a sessão. Tentando novamente em 5 segundos...")
-				time.sleep(5)  # Aguarda 5 segundos antes de tentar novamente
+				print("Nova tentativa de inicar sessão em 10 segundos.")	
+				time.sleep(10)  # Verifica a cada 10 segundos
 
 	def activate_best_route(self, filename):
 		"""
-		Ativa a melhor rota disponível na tabela de rotas com base no número de hops
+		Ativa a melhor rota disponível na tabela de rotas com base no número de metric
 		para um fluxo específico (filename).
 		"""
 		best_route = None
-		min_hops = float('inf')  # Define o maior valor possível para comparar
+		min_metric = float('inf')  # Define o maior valor possível para comparar
 		destination = None   
 			
-		# Procura a melhor rota na tabela de roteamento com base no número de hops
+		# Procura a melhor rota na tabela de roteamento com base no número de metric
 		with self.lock:
 			for dest, route_info in self.routing_table.items():
 				if filename in route_info:  # Verifica se o fluxo existe na tabela
-					if route_info[filename]['hops'] < min_hops:
-						min_hops = route_info[filename]['hops']
+					if route_info[filename]['metric'] < min_metric:
+						min_metric = route_info[filename]['metric']
 						best_route = route_info[filename]
 						destination = dest
 
 		if best_route:
 			with self.lock:
 				self.routing_table[destination][filename]['status'] = "active"
-			print(f"Activating best route to {best_route['source_id']} at {destination} with {min_hops} hops.")
+			print(f"Activating best route to {best_route['source_id']} at {destination} with {min_metric} metric.")
 			activate_message = FloodingMessage()
 			activate_message.type = FloodingMessage.ACTIVATE_ROUTE
 			activate_message.stream_ids.append(filename)
@@ -369,11 +390,23 @@ class Client:
 		else:
 			print("No active route available to activate.")
 			return None
-  
+
 	def close_session(self, video_session):
-		if video_session.active == False:
-			self.session_window.destroy()  # Fecha a janela da sessão
-			self.close_button.destroy() # Apaga o botão da interface
+		"""
+		Fecha a sessão de vídeo atual e remove a janela e o botão associados.
+		"""
+		if not video_session.active:  # Verifica se a sessão já está inativa
+			# Fecha a janela da sessão de vídeo, se existir
+			if self.session_window:
+				self.session_window.destroy()
+				self.session_window = None  # Limpa a referência
+
+			# Remove o botão de fechar sessão, se existir
+			if self.close_button:
+				self.close_button.destroy()
+				self.close_button = None  # Limpa a referência
+			print("Sessão de vídeo fechada.")
+
 
 	def handler(self):
 		"""Handler on explicitly closing the GUI window."""

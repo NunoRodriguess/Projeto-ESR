@@ -19,8 +19,9 @@ class VideoSession:
     PAUSE = 2
     TEARDOWN = 3
     
-    def __init__(self, master, destination_ip, destination_rtsp_port, rtp_port, fileName):
+    def __init__(self, master, source_ip, destination_ip, destination_rtsp_port, rtp_port, fileName):
         self.master = master
+        self.client_ip = source_ip
         self.destination_ip = destination_ip
         self.destination_rtsp_port = destination_rtsp_port
         self.rtp_port = rtp_port 
@@ -37,6 +38,14 @@ class VideoSession:
         
         self.connectToNeighbor()
         self.createWidgets()
+        
+    def update_destination(self, new_ip, new_rtsp_port):
+        """
+        Atualiza o destino da sessão de vídeo para um novo IP e porta RTSP sem interromper a sessão.
+        """
+        self.destination_ip = new_ip
+        self.rtsp_port = new_rtsp_port
+        print(f"Video session updated to new destination {new_ip}:{new_rtsp_port}")
         
     def createWidgets(self):
         self.setup = Button(self.master, width=20, text="Setup", command=self.setupMovie)
@@ -130,25 +139,25 @@ class VideoSession:
             threading.Thread(target=self.recvRtspReply).start()
             self.rtspSeq += 1
             #request = f"SETUP {self.fileName} RTSP/1.0\nCSeq: {self.rtspSeq}\n"
-            request = f"SETUP {self.fileName} RTSP/1.0\nCSeq: {self.rtspSeq}\nTransport: RTP/UDP; client_port= {self.rtp_port}\n"
+            request = f"SETUP {self.fileName} RTSP/1.0\nCSeq: {self.rtspSeq}\nClient-IP: {self.client_ip}\n"
             self.requestSent = self.SETUP
         
         # Play request
         elif requestCode == self.PLAY and self.state == self.READY:
             self.rtspSeq += 1
-            request = f"PLAY {self.fileName} RTSP/1.0\nCSeq: {self.rtspSeq}\nSession: {self.sessionId}\n"
+            request = f"PLAY {self.fileName} RTSP/1.0\nCSeq: {self.rtspSeq}\nSession: {self.sessionId}\nClient-IP: {self.client_ip}\n"
             self.requestSent = self.PLAY
             
         # Pause request
         elif requestCode == self.PAUSE and self.state == self.PLAYING:
             self.rtspSeq += 1
-            request = f"PAUSE {self.fileName} RTSP/1.0\nCSeq: {self.rtspSeq}\nSession: {self.sessionId}\n"
+            request = f"PAUSE {self.fileName} RTSP/1.0\nCSeq: {self.rtspSeq}\nSession: {self.sessionId}\nClient-IP: {self.client_ip}\n"
             self.requestSent = self.PAUSE
             
         # Teardown request
         elif requestCode == self.TEARDOWN and not self.state == self.INIT:
             self.rtspSeq += 1
-            request = f"TEARDOWN {self.fileName} RTSP/1.0\nCSeq: {self.rtspSeq}\nSession: {self.sessionId}\n"
+            request = f"TEARDOWN {self.fileName} RTSP/1.0\nCSeq: {self.rtspSeq}\nSession: {self.sessionId}\nClient-IP: {self.client_ip}\n"
             self.requestSent = self.TEARDOWN
         else:
             return

@@ -33,8 +33,7 @@ class Node:
         # Criação do socket RTP (UDP)
         self.rtp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.rtp_socket.bind((self.node_ip, self.rtp_port))
-    
-        
+      
     def register_with_bootstrapper(self):
         """
         Registra o nó com o Bootstrapper e recebe uma lista de vizinhos.
@@ -168,7 +167,8 @@ class Node:
                             
                             # Ativa a rota
                             elif flooding_message.type == FloodingMessage.ACTIVATE_ROUTE:
-                                self.activate_best_route(flooding_message)    
+                                self.activate_best_route(flooding_message)  
+                                   
                             else:
                                 raise ValueError(f"Unknown FloodingMessage type: {flooding_message.type}")
                         
@@ -206,7 +206,7 @@ class Node:
         
     def send_ping_to_neighbors(self):
         while True:
-            time.sleep(10)
+            time.sleep(15)
 
             for neighbor_ip, neighbor_info in list(self.neighbors.items()):
                 # Verificar se o vizinho já está marcado como inativo
@@ -265,12 +265,10 @@ class Node:
                     
     def handle_flooding_message(self, flooding_message):
         print(f"Received flooding message from {flooding_message.source_ip}")
-
         # Atualiza a tabela de rotas
         self.update_route_table(flooding_message)
-        
+        metric = flooding_message.metric + 1
         # Reencaminha a mensagem para todos os vizinhos, exceto o remetente com a atualização da métrica
-        new_hops = flooding_message.hops + 1
         for neighbor_ip, neighbor_info in self.neighbors.items():
             if neighbor_ip != flooding_message.source_ip and neighbor_ip not in self.routing_table :  # Não reencaminhe de volta para quem enviou
                 try:
@@ -278,11 +276,11 @@ class Node:
                         s.connect((neighbor_ip, neighbor_info['control_port']))
                         flooding_message.source_ip = self.node_ip
                         flooding_message.source_id = self.node_id
-                        flooding_message.hops = new_hops 
+                        flooding_message.metric = metric
                         flooding_message.control_port = self.control_port
                         flooding_message.rtsp_port = self.rtsp_port
                         s.send(flooding_message.SerializeToString())
-                        print(f"Re-sent flooding message to {neighbor_info['node_id']} with hops={flooding_message.hops}")
+                        print(f"Re-sent flooding message to {neighbor_info['node_id']} with metric={flooding_message.metric}")
                 except Exception as e:
                     print(f"Failed to re-send flooding message to {neighbor_info['node_id']}: {e}")
                     
@@ -292,7 +290,7 @@ class Node:
         agora levando em consideração múltiplos fluxos de vídeo.
         """
         destination = flooding_message.source_ip
-        metric = flooding_message.hops
+        metric = flooding_message.metric
         
         # Iterar sobre os fluxos de vídeo (stream_ids) recebidos
         for stream_id in flooding_message.stream_ids:
@@ -301,31 +299,31 @@ class Node:
                 if destination not in self.routing_table:
                     self.routing_table[destination] = {}
                 
-                # Se a rota para o destino e o fluxo não existirem ou se a métrica for melhor (menor número de hops)
+                # Se a rota para o destino e o fluxo não existirem ou se a métrica for melhor (menor número de metric)
                 if (stream_id not in self.routing_table[destination] or 
-                    metric < self.routing_table[destination][stream_id]['hops']):
+                    metric < self.routing_table[destination][stream_id]['metric']):
 
                     self.routing_table[destination][stream_id] = {
                         "source_ip": flooding_message.source_ip,
                         "source_id": flooding_message.source_id,
-                        "hops": metric,
+                        "metric": metric,
                         "status": flooding_message.route_state,
                         "control_port": flooding_message.control_port,
                         "rtsp_port": flooding_message.rtsp_port,
                         "flow": "inactive"
                     }
                     
-                    print(f"Route updated for stream {stream_id} to {self.routing_table[destination][stream_id]['source_id']} with hops={metric}")
+                    print(f"Route updated for stream {stream_id} to {self.routing_table[destination][stream_id]['source_id']} with metric={metric}")
         
         print(f"Routing table is updated for streams: {list(flooding_message.stream_ids)}")  
-
+                    
     def activate_best_route(self, flooding_message):
         """
         Ativa a melhor rota disponível na tabela de rotas com base no número de hops
         para um fluxo específico (filename) contido na mensagem de flooding.
         """
         best_route = None
-        min_hops = float('inf')  # Define o maior valor possível para comparar
+        min_metric = float('inf')  # Define o maior valor possível para comparar
         destination = None  
         filename = None 
 
@@ -340,18 +338,20 @@ class Node:
                         if route_info[stream_id]['status'] == "active":
                             if filename not in self.sessions:
                                 self.sessions[filename] = {} 
-                            # Adiciona o novo recetor dos videos há sessão
                             if flooding_message.source_ip not in self.sessions[stream_id]:
                                 self.sessions[stream_id][flooding_message.source_ip] = {}
+                            # Adiciona o novo recetor dos videos há sessão
                             self.sessions[stream_id][flooding_message.source_ip]['rtp_port'] = flooding_message.rtp_port
-                            # O cliente nao manda a sua porta rtsp então é necessário fazer esta confirmação
+                            # O cliente nao manda a sua porta rtsp
                             if flooding_message.rtsp_port:
                                 self.sessions[stream_id][flooding_message.source_ip]['rtsp_port'] = flooding_message.rtsp_port
+                            self.sessions[stream_id][flooding_message.source_ip]['session'] = stream_id
                             print(f"Rota já ativa para o fluxo {stream_id} em {dest}. Reutilizando.")
                             return
+                        
                         # Caso contrário, encontre a melhor rota
-                        if route_info[stream_id]['hops'] < min_hops:
-                            min_hops = route_info[stream_id]['hops']
+                        if route_info[stream_id]['metric'] < min_metric:
+                            min_metric = route_info[stream_id]['metric']
                             best_route = route_info[stream_id]
                             filename = stream_id
                             destination = dest
@@ -368,8 +368,9 @@ class Node:
                 # O cliente nao manda a sua porta rtsp
                 if flooding_message.rtsp_port:
                     self.sessions[stream_id][flooding_message.source_ip]['rtsp_port'] = flooding_message.rtsp_port
-                    
-            print(f"Activating best route to {best_route['source_id']} at {destination} with {min_hops} hops.")
+                self.sessions[stream_id][flooding_message.source_ip]['session'] = stream_id
+
+            print(f"Activating best route to {best_route['source_id']} at {destination} with {min_metric} hops.")
             # Enviar mensagem de ativação para a melhor rota
             try:
                 activate_message = FloodingMessage()  # Criação de uma nova mensagem de ativação
@@ -399,9 +400,28 @@ class Node:
             threading.Thread(target=self.handle_neighbor, args=(neighbor_socket, neighbor_address)).start()
 
         for key, value in self.routing_table.items():
-            if value[filename]["source_id"] == search_value[filename]["source_id"] and value[filename]["hops"] == search_value[filename]["hops"]:
+            if value[filename]["source_id"] == search_value[filename]["source_id"] and value[filename]["metric"] == search_value[filename]["metric"]:
                 return key
         return None
+    
+    def get_client_ip_from_request(self, request):
+        """Extrai o Client-IP de uma requisição RTSP."""
+        lines = request.splitlines()
+        for line in lines:
+            if "Client-IP" in line:
+                return line.split(": ")[1]
+        return None
+    
+    def replace_client_ip_in_request(self, request, new_ip):
+        """Substitui o Client-IP na requisição por um novo IP."""
+        lines = request.splitlines()
+        updated_request = []
+        for line in lines:
+            if "Client-IP" in line:
+                updated_request.append(f"Client-IP: {new_ip}")
+            else:
+                updated_request.append(line)
+        return "\n".join(updated_request)
 
     def handle_neighbor(self, neighbor_socket, neighbor_address):
         """Função principal para lidar com as mensagens do vizinho."""
@@ -419,18 +439,19 @@ class Node:
                 lines = request.splitlines()
                 line1 = lines[0].split(' ')
                 filename = line1[1]
-                
+                dest_ip = self.get_client_ip_from_request(request)
+                   
                 # Inicializa o dicionario caso nao exista
                 with self.lock:
                     self.sessions.setdefault(filename, {})
-                    self.sessions[filename].setdefault(neighbor_address[0], {})
+                    self.sessions[filename].setdefault(dest_ip, {})
                 
                  # Status inicial da rota é sempre INIT
-                if 'status' not in self.sessions[filename][neighbor_address[0]]: 
+                if 'status' not in self.sessions[filename][dest_ip]: 
                     with self.lock: 
-                        self.sessions[filename][neighbor_address[0]]['status'] = "INIT"
+                        self.sessions[filename][dest_ip]['status'] = "INIT"
                    
-                neighbor_status = self.sessions[filename][neighbor_address[0]]['status']
+                neighbor_status = self.sessions[filename][dest_ip]['status']
                 route = self.get_route_with_stream(filename) # Verificar se o node já está a receber dados
                 
                 # Preparação para a receção de pacotes do video requisitado
@@ -440,13 +461,14 @@ class Node:
                         self.replyRtsp(seq, filename, neighbor_socket) # Responde logo ao node com a confirmação
                         
                     else: # Caso contrário
-                        dest, rtsp_port = self.forward_request(filename, request, neighbor_socket)
+                        modified_request = self.replace_client_ip_in_request(request, self.node_ip)
+                        dest, rtsp_port = self.forward_request(filename, modified_request, neighbor_socket)
                         with self.lock: 
                             self.routing_table[dest][filename]['flow'] = "active"
                     
                     # Atualiza as variaveis de quem fez o pedido SETUP
                     with self.lock: 
-                        self.sessions[filename][neighbor_address[0]]['status'] = "READY"
+                        self.sessions[filename][dest_ip]['status'] = "READY"
                     
                 # Inicialização da receção dos pacotes do video requisitos      
                 elif "PLAY" in request and neighbor_status == "READY":  
@@ -456,13 +478,14 @@ class Node:
                         self.replyRtsp(seq, filename, neighbor_socket) # Responde ao node com a confirmação
                     
                     else:  # Caso contrário
-                        dest, rtsp_port  = self.forward_request(filename, request, neighbor_socket)
+                        modified_request = self.replace_client_ip_in_request(request, self.node_ip)
+                        dest, rtsp_port  = self.forward_request(filename, modified_request, neighbor_socket)
                        
                     # Atualiza as variaveis de quem fez o pedido PLAY e começa a enviar lhe os pacotes RTP
                     with self.lock: 
-                        self.sessions[filename][neighbor_address[0]]['status'] = "PLAYING"
-                        self.sessions[filename][neighbor_address[0]]['flow'] = "YES"
-                    self.handle_rtp_forwarding(neighbor_address[0], rtsp_port, filename)
+                        self.sessions[filename][dest_ip]['status'] = "PLAYING"
+                        self.sessions[filename][dest_ip]['flow'] = "YES"
+                    self.handle_rtp_forwarding(dest_ip, rtsp_port, filename)
                 
                 # Interrupção da receção dos pacotes do video requisitado   
                 elif "PAUSE" in request and neighbor_status == "PLAYING":             
@@ -471,15 +494,16 @@ class Node:
                         self.replyRtsp(seq, filename, neighbor_socket) # Responde ao node com a confirmação
                                          
                     else:  # Caso contrário
-                        self.forward_request(filename, request, neighbor_socket)
+                        modified_request = self.replace_client_ip_in_request(request, self.node_ip)
+                        self.forward_request(filename, modified_request, neighbor_socket)
                     
                     with self.lock: 
-                        self.sessions[filename][neighbor_address[0]]['status'] = "READY"
-                        self.sessions[filename][neighbor_address[0]]['flow'] = "NO" # Para a receção de dados apenas para este vizinho
+                        self.sessions[filename][dest_ip]['status'] = "READY"
+                        self.sessions[filename][dest_ip]['flow'] = "NO" # Para a receção de dados apenas para este vizinho
                 
                 # Encerrar a comunicação com o node que fez a requisição do video
                 elif "TEARDOWN" in request:   
-                    self.remove_connection(filename, neighbor_address[0], request, neighbor_socket)
+                    self.remove_connection(filename, dest_ip, request, neighbor_socket)
                     
             except Exception as e:
                 print(f"Ocorreu um erro: {e}")
@@ -580,7 +604,7 @@ class Node:
 
             # Enviar a resposta de volta ao vizinho
             neighbor_socket.send(response.encode())
-            print(f"Enviou para o vizinho a resposta pela socket  : {neighbor_socket}")
+            print(f"Reencaminhou a resposta recebida")
                 
         except Exception as e:
             print(f"Falha ao enviar requisição RTSP: {e}")
@@ -598,15 +622,29 @@ class Node:
                 stream_id = rtp_packet.decode(data) # Extrai o nome do video do pacote recebido para saber para quem tem que o reencaminhar
                 with self.lock: 
                     for client_ip, client_info in self.sessions[stream_id].items():
+                        client_socket = None
+                        client_rtp_port = None
                         if "rtpSocket" not in client_info:
                             client_info["rtpSocket"] = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                        client_socket = client_info["rtpSocket"]
-                        client_rtp_port = client_info['rtp_port']
-                        if client_info['flow'] == "YES":
+                        if "rtpSocket" in client_info:
+                            client_socket = client_info["rtpSocket"]
+                        if "rtp_port" in client_info:
+                            client_rtp_port = client_info['rtp_port']
+                        if "flow" in client_info and client_info["flow"] == "YES":
                             print(f"Pacote RTP recebido do vizinho, enviando ao cliente {client_ip}:{client_rtp_port}")
                             client_socket.sendto(data, (client_ip, client_rtp_port))
              
     def remove_connection(self, filename, neighbor_address, request, neighbor_socket):
+        
+        # Como o node nao tem mais clientes para enviar, avisa o vizinho que o está a enviar pacotes para parar de o fazer
+        active_route = self.get_active_route(filename)
+        rtsp_port = active_route['route_info']['rtsp_port']
+        dest = active_route['destination']
+        rtsp_socket = self.get_or_create_rtsp_connection(filename, dest, rtsp_port) # Conecta se com o vizinho ativo
+        # Reencaminha lhe o pedido 
+        self.send_rtsp_request(rtsp_socket, request, neighbor_socket, filename)   
+        time.sleep(5)      
+                    
         # Verifique se o filename e o cliente existem na sessão
         with self.lock: 
             if filename in self.sessions and neighbor_address in self.sessions[filename]:
@@ -624,15 +662,7 @@ class Node:
 
                 # Se o dicionário do filename está vazio, remova também
                 if not self.sessions[filename]:  # Verifica se não há mais clientes
-                    self.sessions.pop(filename)
-                    
-                    # Como o node nao tem mais clientes para enviar, avisa o vizinho que o está a enviar pacotes para parar de o fazer
-                    active_route = self.get_active_route(filename)
-                    rtsp_port = active_route['route_info']['rtsp_port']
-                    dest = active_route['destination']
-                    rtsp_socket = self.get_or_create_rtsp_connection(filename, dest, rtsp_port) # Conecta se com o vizinho ativo
-                    # Reencaminha lhe o pedido 
-                    self.send_rtsp_request(rtsp_socket, request, neighbor_socket, filename)         
+                    self.sessions.pop(filename)    
                     print(f"Removido {filename} do dicionário pois não há mais clientes.")
             else:
                 print(f"Cliente {neighbor_address} não encontrado em {filename}")

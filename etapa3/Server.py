@@ -19,7 +19,8 @@ class Server:
         self.rtspSocket = None
         self.movies = {
             "movie.Mjpeg",
-            "movie-copy.Mjpeg"
+            "movie-copy.Mjpeg",
+            "output.avi"
         }
 	
     def register_with_bootstrapper(self):
@@ -150,8 +151,8 @@ class Server:
                             
                             # Ativa a rota
                             if flooding_message.type == FloodingMessage.ACTIVATE_ROUTE:
-                                print("Pronto para receber pedidos RTSP\n")
-                                self.receive_neighbors_info(flooding_message)    
+                                self.receive_neighbors_info(flooding_message)   
+                                
                             else:
                                 raise ValueError(f"Unknown FloodingMessage type: {flooding_message.type}")
                         
@@ -165,7 +166,7 @@ class Server:
         if 'rtp_port' not in self.neighbors_info[flooding_message.source_ip]:
             self.neighbors_info[flooding_message.source_ip]['rtp_port'] = flooding_message.rtp_port
         threading.Thread(target=self.openRTSP_socket, args=(flooding_message.source_ip,)).start() # Abre socket rtsp    
-        
+                        
     def handle_update_neighbors(self, control_message):
         print(f"Updating neighbors with {control_message.node_id}")
         neighbor_id = control_message.node_id
@@ -194,7 +195,7 @@ class Server:
         
     def send_ping_to_neighbors(self):
         while True:
-            time.sleep(10)
+            time.sleep(15)
             
             for neighbor_ip, neighbor_info in list(self.neighbors.items()):
                 # Verificar se o vizinho já está marcado como inativo
@@ -253,7 +254,7 @@ class Server:
                 
     def send_flood_to_neighbors(self):
         while True:
-            time.sleep(10)
+            time.sleep(15)
             
             for neighbor_ip, neighbor_info in list(self.neighbors.items()):
                 # Verificar se o vizinho já está marcado como inativo
@@ -272,7 +273,7 @@ class Server:
         flooding_message.stream_ids.extend(self.movies)
         flooding_message.route_state = "inactive"
         flooding_message.control_port = self.control_port
-        flooding_message.hops = 0  # Inicie o contador de saltos
+        flooding_message.metric = 0
         flooding_message.rtsp_port = self.server_rtsp_port
 
         for neighbor_ip, neighbor_info in self.neighbors.items():
@@ -286,7 +287,6 @@ class Server:
                 print(f"Failed to send flooding message to {neighbor_info['node_id']}: {e}")
             
     def openRTSP_socket(self, node_ip):   
- 
         if self.rtspSocket is None:
             self.rtspSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.rtspSocket.bind(('', self.server_rtsp_port))
