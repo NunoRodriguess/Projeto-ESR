@@ -9,7 +9,7 @@ message ControlMessage {
     PING = 2;
     PONG = 3;
     UPDATE_NEIGHBORS = 4;
-    INACTIVE_NODE = 5;  // Novo tipo de mensagem
+    ACK = 5; 
   }
 
   MessageType type = 1;
@@ -19,6 +19,9 @@ message ControlMessage {
   repeated NeighborInfo neighbors = 5;
   int32 control_port = 6;
   int32 data_port = 7;
+  float timestamp = 8;
+  float accumulated_time = 9;
+  int32 rtsp_port = 10;
 }
 
 message NeighborInfo {
@@ -27,13 +30,15 @@ message NeighborInfo {
   string node_type = 3;
   int32 control_port = 4;
   int32 data_port = 5;
+  int32 rtsp_port = 6;
 }
 
 message FloodingMessage {
     // Identificador do tipo de mensagem
     enum MessageType {
-        FLOODING_UPDATE = 0; 
-        ACTIVATE_ROUTE = 1;
+      FLOODING_UPDATE = 0; 
+      ACTIVATE_ROUTE = 1;
+      DEACTIVATE_ROUTE = 2;
     }
 
     MessageType type = 1;                // Tipo da mensagem
@@ -41,20 +46,8 @@ message FloodingMessage {
     repeated string stream_ids = 3;      // ID do fluxo de dados que está sendo transmitido
     string source_ip = 4;                // IP da origem que está enviando a mensagem
     string route_state = 5;               // Estado da rota (ativa/inativa)
-    int32 hops = 6;                       // Número de saltos desde o nó de origem
-    int64 timestamp = 7;                 // Timestamp da mensagem
-    int32 control_port = 8;   
-    int32 rtsp_port = 9;  
-    int32 rtp_port = 10;  
-}
-
-message ContentRequest {
-  string content_id = 1;     
-  string client_id = 2;   
-}
-
-message ContentResponse {
-  string content_id = 1;    
-  string source_ip = 2;     
-  int32 source_port = 3;  
+    int32 metric = 6;                       // Número de saltos desde o nó de origem
+    int32 control_port = 7; 
+    int32 rtsp_port = 8;  
+    int32 rtp_port = 9;  
 }

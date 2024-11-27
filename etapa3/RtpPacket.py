@@ -8,7 +8,7 @@ class RtpPacket:
 	def __init__(self):
 		pass
 		
-	def encode(self, version, padding, extension, cc, seqnum, marker, pt, ssrc, payload):
+	def encode(self, version, padding, extension, cc, seqnum, marker, pt, ssrc, payload, filename, sender_ip):
 		"""Encode the RTP packet with header fields and payload."""
 		timestamp = int(time())
 		header = bytearray(HEADER_SIZE) 
@@ -30,12 +30,62 @@ class RtpPacket:
 		header[11] = ssrc & 0xFF
 		# set header and  payload
 		self.header = header
-		self.payload = payload
 		
+		filename_bytes = filename.encode('utf-8')
+		sender_ip_bytes = sender_ip.encode('utf-8')
+		# Incluindo o nome do arquivo e o ip de quem envia o pacote no payload antes do vídeo
+		payload = filename_bytes + b'\0' + sender_ip_bytes + b'\0' + payload  # Adicionando um terminador null para o filename e para o sender_ip
+
+		self.payload = payload
+  
 	def decode(self, byteStream):
-		"""Decode the RTP packet."""
+		"""Decode the RTP packet and extract filename and sender IP if present."""
 		self.header = bytearray(byteStream[:HEADER_SIZE])
 		self.payload = byteStream[HEADER_SIZE:]
+
+		filename = None
+		sender_ip = None
+		try:
+			# Extract filename by looking for the first null terminator
+			filename_end_index = self.payload.index(0)  # Null byte
+			filename = self.payload[:filename_end_index].decode('utf-8')
+			remaining_payload = self.payload[filename_end_index + 1:]
+
+			# Extract sender IP by looking for the next null terminator
+			sender_ip_end_index = remaining_payload.index(0)
+			sender_ip = remaining_payload[:sender_ip_end_index].decode('utf-8')
+
+			# Update the payload to exclude filename and sender_ip
+			self.payload = remaining_payload[sender_ip_end_index + 1:]
+		except ValueError:
+			# Handle the case where filename or sender_ip is not present
+			pass
+
+		return filename, sender_ip
+
+	def updateSenderIp(self, byteStream, new_sender_ip):
+		"""Update the sender_ip in the RTP packet."""
+		try:
+			self.header = bytearray(byteStream[:HEADER_SIZE])
+			self.payload = byteStream[HEADER_SIZE:]
+   
+			# Extrair o nome do arquivo do início do payload
+			filename_end_index = self.payload.index(0)  # Null byte
+			filename = self.payload[:filename_end_index].decode('utf-8')
+			remaining_payload = self.payload[filename_end_index + 1:]
+
+			# Extrair o sender_ip existente
+			sender_ip_end_index = remaining_payload.index(0)  # Próximo null byte
+			remaining_payload = remaining_payload[sender_ip_end_index + 1:]  # Atualizar para ignorar o sender_ip antigo
+
+			# Codificar o novo sender_ip
+			new_sender_ip_bytes = new_sender_ip.encode('utf-8') 
+
+			# Reconstruir o payload com o novo sender_ip
+			self.payload = filename.encode('utf-8') + b'\0' + new_sender_ip_bytes + b'\0' + remaining_payload
+
+		except ValueError:
+			print("Erro ao atualizar o sender_ip: Payload malformado.")
 	
 	def version(self):
 		"""Return RTP version."""
@@ -66,5 +116,3 @@ class RtpPacket:
 
 	def printheader(self):
 		print("[RTP Packet] Version: ...")
-
-
