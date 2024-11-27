@@ -29,7 +29,7 @@ class VideoSession:
         self.rtspSeq = 0
         self.requestSent = -1
         self.teardownAcked = 0
-        self.frameNbr = 0
+        self.frameNbr = 1
         self.sessionId = None
         self.active = False # Determina se o video está ou nao em execução
         
@@ -39,7 +39,7 @@ class VideoSession:
         self.connectToNeighbor()
         self.createWidgets()
         
-    def update_destination(self, new_ip, new_rtsp_port):
+    def update_route(self, new_ip, new_rtsp_port):
         """
         Atualiza o destino da sessão de vídeo para um novo IP e porta RTSP sem interromper a sessão.
         """
@@ -100,15 +100,16 @@ class VideoSession:
                     currFrameNbr = rtpPacket.seqNum()
                     print("Current Seq Num: " + str(currFrameNbr))
                                         
-                    if currFrameNbr > self.frameNbr: # Discard the late packet
+                    if currFrameNbr >= self.frameNbr: # Discard the late packet
                         self.frameNbr = currFrameNbr
                         self.updateMovie(self.writeFrame(rtpPacket.getPayload()))
                     
-                    # Se o vídeo já começou e o currFrameNbr é 1, reinicie o vídeo
-                    if self.active and currFrameNbr == 1:
-                        print("Reiniciando o vídeo...")
-                        self.frameNbr = 0  # Reinicia o contador de frames
-                        self.updateMovie(self.writeFrame(rtpPacket.getPayload()))  # Atualiza para a primeira imagem
+                    # Se o vídeo já começou e o currFrameNbr é 1 ou é muito menor do que foi recebido anteriormente, reinicie o vídeo
+                    if self.active:
+                        if currFrameNbr == 1 or currFrameNbr < self.frameNbr - 200:
+                            print("Reiniciando o vídeo...")
+                            self.frameNbr = currFrameNbr # Reinicia o contador de frames
+                            self.updateMovie(self.writeFrame(rtpPacket.getPayload()))  # Atualiza para a primeira imagem
                     else:
                         self.active = True
                         video_started = True  # Marca que o vídeo já começou
@@ -138,26 +139,25 @@ class VideoSession:
         if requestCode == self.SETUP and self.state == self.INIT:
             threading.Thread(target=self.recvRtspReply).start()
             self.rtspSeq += 1
-            #request = f"SETUP {self.fileName} RTSP/1.0\nCSeq: {self.rtspSeq}\n"
-            request = f"SETUP {self.fileName} RTSP/1.0\nCSeq: {self.rtspSeq}\nClient-IP: {self.client_ip}\n"
+            request = f"SETUP {self.fileName} RTSP/1.0\nCSeq: {self.rtspSeq}\nIP: {self.client_ip}\n"
             self.requestSent = self.SETUP
         
         # Play request
         elif requestCode == self.PLAY and self.state == self.READY:
             self.rtspSeq += 1
-            request = f"PLAY {self.fileName} RTSP/1.0\nCSeq: {self.rtspSeq}\nSession: {self.sessionId}\nClient-IP: {self.client_ip}\n"
+            request = f"PLAY {self.fileName} RTSP/1.0\nCSeq: {self.rtspSeq}\nSession: {self.sessionId}\nIP: {self.client_ip}\n"
             self.requestSent = self.PLAY
             
         # Pause request
         elif requestCode == self.PAUSE and self.state == self.PLAYING:
             self.rtspSeq += 1
-            request = f"PAUSE {self.fileName} RTSP/1.0\nCSeq: {self.rtspSeq}\nSession: {self.sessionId}\nClient-IP: {self.client_ip}\n"
+            request = f"PAUSE {self.fileName} RTSP/1.0\nCSeq: {self.rtspSeq}\nSession: {self.sessionId}\nIP: {self.client_ip}\n"
             self.requestSent = self.PAUSE
             
         # Teardown request
         elif requestCode == self.TEARDOWN and not self.state == self.INIT:
             self.rtspSeq += 1
-            request = f"TEARDOWN {self.fileName} RTSP/1.0\nCSeq: {self.rtspSeq}\nSession: {self.sessionId}\nClient-IP: {self.client_ip}\n"
+            request = f"TEARDOWN {self.fileName} RTSP/1.0\nCSeq: {self.rtspSeq}\nSession: {self.sessionId}\nIP: {self.client_ip}\n"
             self.requestSent = self.TEARDOWN
         else:
             return
@@ -185,9 +185,7 @@ class VideoSession:
     def parseRtspReply(self, data):
         """Parse the RTSP reply from the server."""
         lines = data.split('\n')
-        print(f"LINHES: {lines}\n")
         seqNum = int(lines[1].split(' ')[1])
-        
         # Process only if the server reply's sequence number is the same as the request's
         if seqNum == self.rtspSeq:
             session = lines[2].split(' ')[1]

@@ -1,5 +1,5 @@
 from random import randint
-import sys, traceback, threading, socket
+import sys, traceback, threading, socket, select, time
 
 from VideoStream import VideoStream
 from RtpPacket import RtpPacket
@@ -21,118 +21,136 @@ class ServerWorker:
 	
 	neighborInfo = {}
 	
-	def __init__(self, neighborInfo):
+	def __init__(self, neighborInfo, server_ip):
+		self.server_ip = server_ip
+		self.neighborInfo = {} 
 		self.neighborInfo = neighborInfo
-  		
-	def run(self):
-		threading.Thread(target=self.recvRtspRequest).start()
-	
-	def recvRtspRequest(self):
-		"""Receive RTSP request from the client."""
-		connSocket = self.neighborInfo['rtspSocket']
-		while True:            
-			data = connSocket.recv(256)
-			if data:
-				print("Data received:\n" + data.decode("utf-8") + "\n")
-				self.processRtspRequest(data.decode("utf-8"))
-	
-	def processRtspRequest(self, data):
+		self.neighbor_lock = threading.Lock()
+		self.active = True
+
+	def update_neighborInfo(self, new_ip, rtspSocket, rtp_port):
+		"""
+		Atualiza o destino da sessão de vídeo para um novo IP e porta RTSP sem interromper a sessão.
+		"""
+		with self.neighbor_lock:
+			self.neighborInfo["ip"] = new_ip
+			self.neighborInfo["rtp_port"] = rtp_port
+			self.neighborInfo["rtspSocket"] = rtspSocket
+		print(f"Video session updated to new destination {new_ip}")
+
+	def processRtspRequest(self, requestType, filename, seq):
 		"""Process RTSP request sent from the client."""
 		# Get the request type
-		request = data.split('\n')
-		line1 = request[0].split(' ')
-		requestType = line1[0]
+		with self.neighbor_lock:
+			if 'state' not in self.neighborInfo:
+					self.neighborInfo['state'] = self.INIT
+					self.neighborInfo['session'] = filename
 
-		# Get the media file name
-		filename = line1[1]
-		self.neighborInfo.setdefault(filename, {})
+		with self.neighbor_lock:
+			neighbors_snapshot =  self.neighborInfo.copy()
 
-		# Agora, você pode acessar o filename com segurança
-		if 'state' not in self.neighborInfo[filename]:
-			self.neighborInfo[filename]['state'] = self.INIT
-			self.neighborInfo[filename]['session'] = filename
-
-		
-		# Get the RTSP sequence number 
-		seq = request[1].split(' ')
-		
 		# Process SETUP request
 		if requestType == self.SETUP:
-			if self.neighborInfo[filename]['state'] == self.INIT:
+			if neighbors_snapshot['state'] == self.INIT:
 				# Update state
 				print("processing SETUP\n")
 				
-				try:
-					self.neighborInfo[filename]['videoStream'] = VideoStream(filename)
-					self.neighborInfo[filename]['state'] = self.READY
-				except IOError:
-					self.replyRtsp(self.FILE_NOT_FOUND_404, seq[1], self.neighborInfo[filename]['session'])
-				
-				# Send RTSP reply
-				self.replyRtsp(self.OK_200, seq[1], self.neighborInfo[filename]['session'])
+				with self.neighbor_lock:
+					try:
+						self.neighborInfo['videoStream'] = VideoStream(filename)
+						self.neighborInfo['state'] = self.READY
+					except IOError:
+						self.replyRtsp(self.FILE_NOT_FOUND_404, seq[1], self.neighborInfo['session'], filename)
+					
+					# Send RTSP reply
+					self.replyRtsp(self.OK_200, seq[1], self.neighborInfo['session'], filename)
 
 		# Process PLAY request 		
 		elif requestType == self.PLAY:
-			if self.neighborInfo[filename]['state'] == self.READY:
+			if neighbors_snapshot['state'] == self.READY:
 				print("processing PLAY\n")
-				self.neighborInfo[filename]['state'] = self.PLAYING
+				with self.neighbor_lock:
+					self.neighborInfo['state'] = self.PLAYING
 				
-				# Create a new socket for RTP/UDP
-				self.neighborInfo[filename]['rtpSocket'] = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+					# Create a new socket for RTP/UDP
+					self.neighborInfo['rtpSocket'] = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 				
-				self.replyRtsp(self.OK_200, seq[1], self.neighborInfo[filename]['session'])
-				
-				# Create a new thread and start sending RTP packets
-				self.neighborInfo[filename]['event'] = threading.Event()
-				self.neighborInfo[filename]['worker']= threading.Thread(target=self.sendRtp, args=(filename,)) 
-				self.neighborInfo[filename]['worker'].start()
+					self.replyRtsp(self.OK_200, seq[1], self.neighborInfo['session'], filename)
+					
+					# Create a new thread and start sending RTP packets
+					self.neighborInfo['event'] = threading.Event()
+					self.neighborInfo['worker']= threading.Thread(target=self.sendRtp, args=(filename,)) 
+					self.neighborInfo['worker'].start()
 		
 		# Process PAUSE request
 		elif requestType == self.PAUSE:
-			if self.neighborInfo[filename]['state'] == self.PLAYING:
+			if neighbors_snapshot['state'] == self.PLAYING:
 				print("processing PAUSE\n")
-				self.neighborInfo[filename]['state'] = self.READY
+				with self.neighbor_lock:
+					self.neighborInfo['state'] = self.READY
+					
+					self.neighborInfo['event'].set()
 				
-				self.neighborInfo[filename]['event'].set()
-			
-				self.replyRtsp(self.OK_200, seq[1], self.neighborInfo[filename]['session'])
+					self.replyRtsp(self.OK_200, seq[1], self.neighborInfo['session'], filename)
 		
 		# Process TEARDOWN request
 		elif requestType == self.TEARDOWN:
 			print("processing TEARDOWN\n")
+			with self.neighbor_lock:
 
-			self.neighborInfo[filename]['event'].set()
-			
-			self.replyRtsp(self.OK_200, seq[1], self.neighborInfo[filename]['session'])
-			
-			# Close the RTP socket
-			self.neighborInfo[filename]['videoStream'].release() 
-			self.neighborInfo[filename]['rtpSocket'].close()
-   					
+				self.neighborInfo['event'].set()
+				
+				self.replyRtsp(self.OK_200, seq[1], self.neighborInfo['session'], filename)
+				
+				# Close the RTP socket
+				self.neighborInfo['videoStream'].release() 
+				self.neighborInfo['rtpSocket'].close()
+
 	def sendRtp(self, filename):
 		"""Send RTP packets over UDP."""
-		while True:
-			self.neighborInfo[filename]['event'].wait(0.05) 
-			
-			# Stop sending if request is PAUSE or TEARDOWN
-			if self.neighborInfo[filename]['event'].isSet(): 
-				break 
-				
-			data = self.neighborInfo[filename]['videoStream'].nextFrame()
-			if data: 
-				frameNumber = self.neighborInfo[filename]['videoStream'].frameNbr()
-				try:
-					address = self.neighborInfo['ip']
-					print(f"Enviar pacote {frameNumber} do video {filename} em UDP para ADRESS :", address)
-					port = int(self.neighborInfo['rtp_port'])
-					self.neighborInfo[filename]['rtpSocket'].sendto(self.makeRtp(data, frameNumber, filename),(address, port))
-				except:
-					print("Connection Error")
-					#print('-'*60)
-					#traceback.print_exc(file=sys.stdout)
-					#print('-'*60)
+		current_ip = None
+		current_port = None
+		current_socket = None
 
-	def makeRtp(self, payload, frameNbr, filename):
+		while True:
+			with self.neighbor_lock:
+				neighbors_snapshot =  self.neighborInfo.copy()
+				
+			# Verificar se o envio deve ser pausado ou interrompido
+			neighbors_snapshot['event'].wait(0.05)
+
+			if neighbors_snapshot['event'].isSet(): 
+				break
+
+			# Obter os dados do próximo frame
+			data = neighbors_snapshot['videoStream'].nextFrame()
+
+			if data:
+				frameNumber = neighbors_snapshot['videoStream'].frameNbr()
+
+				# Bloquear e verificar se há alterações nos dados do vizinho
+				with self.neighbor_lock:
+					neighbors_snapshot =  self.neighborInfo.copy()
+				
+				ip = neighbors_snapshot.get('ip')
+				port = neighbors_snapshot.get('rtp_port', 0)
+				if ip != current_ip:
+					if current_socket:
+						current_socket.close()
+					current_ip = ip
+					current_port = port
+					current_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+					print(f"RTP destination updated to {current_ip}:{current_port}")
+
+				# Enviar pacote RTP usando o socket atualizado
+				if current_socket and current_ip and current_port and self.active:
+					try:
+						print(f"Sending frame {frameNumber} of video {filename} to {current_ip}:{current_port}")
+						current_socket.sendto(self.makeRtp(data, frameNumber, filename, self.server_ip), (current_ip, current_port))
+					except Exception as e:
+						print(f"Error sending RTP packet: {e}")
+
+	def makeRtp(self, payload, frameNbr, filename, sender_ip):
 		"""RTP-packetize the video data."""
 		version = 2
 		padding = 0
@@ -144,11 +162,11 @@ class ServerWorker:
 		ssrc = 0 
 
 		rtpPacket = RtpPacket()
-		rtpPacket.encode(version, padding, extension, cc, seqnum, marker, pt, ssrc, payload, filename)
+		rtpPacket.encode(version, padding, extension, cc, seqnum, marker, pt, ssrc, payload, filename, sender_ip)
 		
 		return rtpPacket.getPacket()
 		
-	def replyRtsp(self, code, seq, session):
+	def replyRtsp(self, code, seq, session, filename):
 		"""Send RTSP reply to the client."""
 		if code == self.OK_200:
 			#print("200 OK")
